@@ -56,30 +56,28 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seleccionados]);
 
-  // ✅ Resize al cambiar tamaño de ventana (evita “achicado” raro de Plotly)
+  // Resize al cambiar tamaño de ventana
   useEffect(() => {
     const onResize = () => {
       import("plotly.js-dist-min").then((mod) => {
-        const Plotly = mod.default;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const Plotly = (mod as any).default ?? mod;
         if (chartRef.current) Plotly.Plots.resize(chartRef.current);
       });
     };
-
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // Renderizar con Plotly cuando cambian curvas o seleccionados
+  // Renderizar con Plotly
   useEffect(() => {
-    if (!chartRef.current) return;
-    if (loading) return;
+    if (!chartRef.current || loading) return;
 
     const traces = seleccionados
       .filter((id) => curvas[id]?.length)
       .map((id, i) => {
         const pts = curvas[id];
-        const label =
-          opcionesDin.find((o) => o.id === id)?.label || `Medición ${i + 1}`;
+        const label = opcionesDin.find((o) => o.id === id)?.label || `Medición ${i + 1}`;
         return {
           x: pts.map((p) => p.X),
           y: pts.map((p) => p.Y),
@@ -93,7 +91,6 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
     if (!traces.length) return;
 
     const layout = {
-      title: { text: "", font: { color: "#94a3b8" } },
       xaxis: {
         title: { text: "X (posición / carrera)", font: { color: "#64748b" } },
         gridcolor: "#334155",
@@ -113,7 +110,7 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
       font: { color: "#94a3b8" },
       legend: { font: { color: "#94a3b8", size: 12 }, bgcolor: "rgba(0,0,0,0)" },
       margin: { t: 20, r: 30, b: 60, l: 70 },
-      height: 500,
+      height: 520,
       autosize: true,
     };
 
@@ -125,10 +122,13 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
     };
 
     import("plotly.js-dist-min").then((mod) => {
-      const Plotly = mod.default;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const Plotly = (mod as any).default ?? mod;
       if (chartRef.current) {
         Plotly.react(chartRef.current, traces, layout, config).then(() => {
-          Plotly.Plots.resize(chartRef.current);
+          setTimeout(() => {
+            if (chartRef.current) Plotly.Plots.resize(chartRef.current);
+          }, 50);
         });
       }
     });
@@ -144,14 +144,12 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
 
   return (
     <div className="space-y-4">
-      {/* Selector de mediciones */}
+      {/* Selector de mediciones — scroll horizontal si hay muchas */}
       <div>
         <p className="text-xs text-slate-400 mb-2">
           Seleccioná una o varias mediciones DIN para superponer:
         </p>
-
-        {/* ✅ Solo esta barra hace scroll horizontal si no entra */}
-        <div className="flex gap-2 overflow-x-auto whitespace-nowrap pb-2">
+        <div className="flex gap-2 overflow-x-auto pb-1">
           {opcionesDin.map((op, i) => {
             const sel = seleccionados.includes(op.id);
             return (
@@ -189,15 +187,12 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
       )}
 
       {!loading && hayCurvas && (
-        <div className="card p-0 overflow-hidden">
-          <div className="px-4 py-3 border-b border-[#334155]">
-            <h3 className="text-sm font-medium text-slate-300">
-              Carta Dinamométrica — Superficie (CS)
-            </h3>
-          </div>
-
-          {/* ✅ Sin recortar: le damos altura fija al contenedor */}
-          <div ref={chartRef} className="w-full max-w-full" style={{ height: 500 }} />
+        <div style={{ width: "100%", minWidth: 0 }}>
+          {/* El div que Plotly controla directamente — sin overflow ni clipping */}
+          <div
+            ref={chartRef}
+            style={{ width: "100%", height: 520 }}
+          />
         </div>
       )}
 

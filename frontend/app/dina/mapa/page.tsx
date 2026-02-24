@@ -32,15 +32,17 @@ export default function MapaPage() {
       ]);
       let pts = mapa.puntos;
 
-      // Filtro validación: si no hay backend específico, mostramos todos
       if (filtroVal === "Solo no validadas") {
         pts = pts.filter((p) => p.Sumergencia != null && p.Sumergencia < 0);
       }
 
       setPuntos(pts);
       if (bats.baterias && batSel.length === 0) {
-        setBaterias(bats.baterias);
-        setBatSel(bats.baterias);
+        const nombres = bats.baterias.map((b: { nombre: string } | string) =>
+          typeof b === "string" ? b : b.nombre
+        );
+        setBaterias(nombres);
+        setBatSel(nombres);
       }
     } catch {
       setPuntos([]);
@@ -49,11 +51,13 @@ export default function MapaPage() {
   }, [sumMin, sumMax, diasMin, diasMax, batSel, filtroVal]);
 
   useEffect(() => {
-    // Carga inicial de baterías
     api.getBaterias()
       .then((r) => {
-        setBaterias(r.baterias || []);
-        setBatSel(r.baterias || []);
+        const nombres = (r.baterias || []).map((b: { nombre: string } | string) =>
+          typeof b === "string" ? b : b.nombre
+        );
+        setBaterias(nombres);
+        setBatSel(nombres);
       })
       .catch(() => {})
       .finally(() => cargar());
@@ -182,7 +186,7 @@ export default function MapaPage() {
         </button>
       </div>
 
-      {/* Info rápida */}
+      {/* KPIs */}
       <div className="grid grid-cols-3 gap-3">
         <KPICard title="Pozos con coords" value={puntosConCoords.length} color="sky" />
         <KPICard
@@ -224,7 +228,6 @@ export default function MapaPage() {
         </div>
       )}
 
-      {/* Tabla de validaciones */}
       {puntos.length > 0 && (
         <div className="space-y-4">
           <div className="border-t border-[#334155] pt-6">

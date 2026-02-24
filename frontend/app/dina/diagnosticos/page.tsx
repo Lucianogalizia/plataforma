@@ -263,7 +263,7 @@ export default function DiagnosticosPage() {
     const keys = Object.keys(tablaF[0] || {}).filter((k) => k !== "Problemáticas");
     const header = [...keys, "Problemáticas"].join(",");
     const body = tablaF.map((r) =>
-      [...keys, "Problemáticas"].map((k) => JSON.stringify((r as Record<string,unknown>)[k] ?? "")).join(",")
+      [...keys, "Problemáticas"].map((k) => JSON.stringify((r as unknown as Record<string,unknown>)[k] ?? "")).join(","))
     );
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([[header, ...body].join("\n")], { type: "text/csv" }));

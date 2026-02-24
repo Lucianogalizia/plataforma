@@ -111,7 +111,8 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
     };
 
     // Cargar Plotly dinámicamente
-    import("plotly.js-dist-min").then((Plotly) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    import("plotly.js-dist-min").then((Plotly: any) => {
       if (chartRef.current) {
         Plotly.react(chartRef.current, traces, layout, config);
       }

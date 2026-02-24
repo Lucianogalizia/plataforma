@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import api, { PuntoMapa } from "@/lib/api";
 
 interface TablaValidacionesProps {
@@ -27,21 +27,29 @@ interface RowState {
   fecha_key: string;
 }
 
+function pozosToRows(pozos: PuntoMapa[]): RowState[] {
+  return pozos.map((p) => ({
+    ...p,
+    valida: true,
+    comentario: "",
+    usuario: "",
+    fecha_key: p.DT_plot_str || "",
+  }));
+}
+
 export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
-  const [rows, setRows] = useState<RowState[]>(() =>
-    pozos.map((p) => ({
-      ...p,
-      valida: true,
-      comentario: "",
-      usuario: "",
-      fecha_key: p.DT_plot_str || "",
-    }))
-  );
+  const [rows, setRows] = useState<RowState[]>(() => pozosToRows(pozos));
   const [saving, setSaving] = useState<Record<number, boolean>>({});
   const [saved, setSaved] = useState<Record<number, boolean>>({});
   const [usuario, setUsuario] = useState("");
   const [editIdx, setEditIdx] = useState<number | null>(null);
   const [editComentario, setEditComentario] = useState("");
+
+  // Actualizar rows cuando cambian los pozos (al aplicar filtros)
+  useEffect(() => {
+    setRows(pozosToRows(pozos));
+    setEditIdx(null);
+  }, [pozos]);
 
   const handleCheckbox = async (idx: number, valida: boolean) => {
     const r = rows[idx];
@@ -130,7 +138,7 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
             </thead>
             <tbody>
               {rows.map((r, i) => (
-                <tr key={i} className="border-b border-[#334155] hover:bg-slate-800/40">
+                <tr key={`${r.NO_key}-${i}`} className="border-b border-[#334155] hover:bg-slate-800/40">
                   <td className="px-3 py-2 text-center">
                     {saving[i] ? (
                       <span className="text-xs text-slate-500">…</span>
@@ -160,7 +168,7 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
                   <td className="px-3 py-2 text-xs text-slate-400">{r.NC ?? "—"}</td>
                   <td className="px-3 py-2 text-xs text-slate-400">{r.ND ?? "—"}</td>
                   {/* Columna comentario inline */}
-                  <td className="px-3 py-2 text-xs text-slate-400 min-w-[180px]">
+                  <td className="px-3 py-2 text-xs min-w-[180px]">
                     {editIdx === i ? (
                       <div className="flex gap-1">
                         <input
@@ -172,7 +180,7 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
                             if (e.key === "Enter") handleGuardarComentario(i);
                             if (e.key === "Escape") setEditIdx(null);
                           }}
-                          className="bg-[#0f172a] border border-sky-500 rounded px-2 py-0.5 text-xs text-slate-200 w-32"
+                          className="bg-[#0f172a] border border-sky-500 rounded px-2 py-0.5 text-xs text-slate-200 w-36"
                         />
                         <button
                           onClick={() => handleGuardarComentario(i)}

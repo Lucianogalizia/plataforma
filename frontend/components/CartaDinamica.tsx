@@ -56,7 +56,6 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seleccionados]);
 
-  // Renderizar con Plotly cuando cambian curvas o seleccionados
   useEffect(() => {
     if (!chartRef.current) return;
     if (loading) return;
@@ -65,7 +64,8 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
       .filter((id) => curvas[id]?.length)
       .map((id, i) => {
         const pts = curvas[id];
-        const label = opcionesDin.find((o) => o.id === id)?.label || `Medición ${i + 1}`;
+        const label =
+          opcionesDin.find((o) => o.id === id)?.label || `Medición ${i + 1}`;
         return {
           x: pts.map((p) => p.X),
           y: pts.map((p) => p.Y),
@@ -110,8 +110,6 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
       modeBarButtonsToRemove: ["sendDataToCloud", "lasso2d"],
     };
 
-    // Cargar Plotly dinámicamente
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     import("plotly.js-dist-min").then((mod) => {
       const Plotly = mod.default;
       if (chartRef.current) {
@@ -135,14 +133,16 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
         <p className="text-xs text-slate-400 mb-2">
           Seleccioná una o varias mediciones DIN para superponer:
         </p>
-        <div className="flex flex-wrap gap-2">
+
+        {/* ✅ Solo esta barra scrollea horizontal si no entra */}
+        <div className="flex gap-2 overflow-x-auto whitespace-nowrap pb-2">
           {opcionesDin.map((op, i) => {
             const sel = seleccionados.includes(op.id);
             return (
               <button
                 key={op.id}
                 onClick={() => toggleSeleccion(op.id)}
-                className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                className={`shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors ${
                   sel
                     ? "border-sky-400 bg-sky-400/10 text-sky-300"
                     : "border-slate-600 text-slate-400 hover:border-slate-400"
@@ -173,13 +173,15 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
       )}
 
       {!loading && hayCurvas && (
-        <div className="card p-0 overflow-hidden">
+        <div className="card p-0 overflow-hidden max-w-full">
           <div className="px-4 py-3 border-b border-[#334155]">
             <h3 className="text-sm font-medium text-slate-300">
               Carta Dinamométrica — Superficie (CS)
             </h3>
           </div>
-          <div ref={chartRef} className="w-full" />
+
+          {/* ✅ esto evita que el gráfico “rompa” el ancho */}
+          <div ref={chartRef} className="w-full max-w-full overflow-hidden" />
         </div>
       )}
 

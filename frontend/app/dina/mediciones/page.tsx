@@ -113,7 +113,7 @@ export default function MedicionesPage() {
               <span className="text-xs text-slate-500">{total} registros</span>
             </div>
             <div className="overflow-x-auto max-h-80 w-full">
-              <table className="text-xs">
+              <table className="text-xs w-max min-w-full">
                 <thead className="sticky top-0 z-10">
                   <tr>
                     {cols.map((c) => (

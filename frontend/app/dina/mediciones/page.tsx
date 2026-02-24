@@ -73,7 +73,7 @@ export default function MedicionesPage() {
   }));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full min-w-0">
       <div>
         <h2 className="text-xl font-bold text-slate-100">
           📈 Mediciones — Pozo: {pozo || "…"}
@@ -112,8 +112,8 @@ export default function MedicionesPage() {
               </h3>
               <span className="text-xs text-slate-500">{total} registros</span>
             </div>
-            <div style={{ overflowX: "auto", maxHeight: "20rem" }}>
-              <table className="text-xs w-max min-w-full">
+            <div className="w-full overflow-x-auto" style={{ maxHeight: "20rem" }}>
+              <table className="text-xs min-w-full">
                 <thead className="sticky top-0 z-10">
                   <tr>
                     {cols.map((c) => (

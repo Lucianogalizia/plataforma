@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import api, { PuntoMapa } from "@/lib/api";
 
 interface TablaValidacionesProps {
@@ -40,12 +40,8 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
   const [saving, setSaving] = useState<Record<number, boolean>>({});
   const [saved, setSaved] = useState<Record<number, boolean>>({});
   const [usuario, setUsuario] = useState("");
-  const [pozo_form, setPozoForm] = useState("");
-  const [fecha_form, setFechaForm] = useState("");
-  const [valida_form, setValidaForm] = useState(true);
-  const [comentario_form, setComentarioForm] = useState("");
-  const [guardandoForm, setGuardandoForm] = useState(false);
-  const [okForm, setOkForm] = useState(false);
+  const [editIdx, setEditIdx] = useState<number | null>(null);
+  const [editComentario, setEditComentario] = useState("");
 
   const handleCheckbox = async (idx: number, valida: boolean) => {
     const r = rows[idx];
@@ -70,20 +66,26 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
     setSaving((p) => ({ ...p, [idx]: false }));
   };
 
-  const handleGuardarForm = async () => {
-    if (!pozo_form) return;
-    setGuardandoForm(true);
+  const handleGuardarComentario = async (idx: number) => {
+    const r = rows[idx];
+    setSaving((p) => ({ ...p, [idx]: true }));
     try {
-      await api.saveValidacion(pozo_form, {
-        fecha_key: fecha_form,
-        validada: valida_form,
-        comentario: comentario_form,
+      await api.saveValidacion(r.NO_key, {
+        fecha_key: r.fecha_key,
+        validada: r.valida,
+        comentario: editComentario,
         usuario: usuario || "anónimo",
       });
-      setOkForm(true);
-      setTimeout(() => setOkForm(false), 3000);
+      setRows((prev) => {
+        const n = [...prev];
+        n[idx] = { ...n[idx], comentario: editComentario };
+        return n;
+      });
+      setSaved((p) => ({ ...p, [idx]: true }));
+      setTimeout(() => setSaved((p) => ({ ...p, [idx]: false })), 2000);
     } catch {/* ignore */}
-    setGuardandoForm(false);
+    setSaving((p) => ({ ...p, [idx]: false }));
+    setEditIdx(null);
   };
 
   const exportCSV = () => {
@@ -98,12 +100,6 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
     a.download = "pozos_sumergencia.csv";
     a.click();
   };
-
-  const pozoOpts = [...new Set(rows.map((r) => r.NO_key))];
-  const fechaOpts = rows
-    .filter((r) => r.NO_key === pozo_form)
-    .map((r) => r.fecha_key)
-    .filter(Boolean);
 
   return (
     <div className="space-y-4">
@@ -125,7 +121,7 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
           <table className="w-full text-sm">
             <thead className="sticky top-0 z-10">
               <tr>
-                {["✅ Válida", "Pozo", "Batería", "Origen", "Fecha", "Días", "Sumergencia", "PB", "NM", "NC", "ND"].map((h) => (
+                {["✅ Válida", "Pozo", "Batería", "Origen", "Fecha", "Días", "Sumergencia", "PB", "NM", "NC", "ND", "Comentario"].map((h) => (
                   <th key={h} className="text-left text-xs text-slate-500 px-3 py-2.5 bg-[#1e293b] border-b border-[#334155] whitespace-nowrap">
                     {h}
                   </th>
@@ -163,6 +159,43 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
                   <td className="px-3 py-2 text-xs text-slate-400">{r.NM ?? "—"}</td>
                   <td className="px-3 py-2 text-xs text-slate-400">{r.NC ?? "—"}</td>
                   <td className="px-3 py-2 text-xs text-slate-400">{r.ND ?? "—"}</td>
+                  {/* Columna comentario inline */}
+                  <td className="px-3 py-2 text-xs text-slate-400 min-w-[180px]">
+                    {editIdx === i ? (
+                      <div className="flex gap-1">
+                        <input
+                          autoFocus
+                          type="text"
+                          value={editComentario}
+                          onChange={(e) => setEditComentario(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleGuardarComentario(i);
+                            if (e.key === "Escape") setEditIdx(null);
+                          }}
+                          className="bg-[#0f172a] border border-sky-500 rounded px-2 py-0.5 text-xs text-slate-200 w-32"
+                        />
+                        <button
+                          onClick={() => handleGuardarComentario(i)}
+                          className="text-green-400 hover:text-green-300 text-xs font-bold"
+                        >✓</button>
+                        <button
+                          onClick={() => setEditIdx(null)}
+                          className="text-slate-500 hover:text-slate-300 text-xs"
+                        >✕</button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setEditIdx(i); setEditComentario(r.comentario); }}
+                        className="text-left w-full group"
+                        title="Clic para editar comentario"
+                      >
+                        {r.comentario
+                          ? <span className="text-amber-300">{r.comentario}</span>
+                          : <span className="text-slate-600 group-hover:text-slate-400 italic">+ agregar</span>
+                        }
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -172,65 +205,13 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
 
       <p className="text-xs text-slate-500">Total: {rows.length} pozos</p>
 
-      {/* Formulario de comentario */}
-      <div className="card space-y-3">
-        <h4 className="text-sm font-medium text-slate-300">💬 Agregar / editar comentario</h4>
-        <div className="grid grid-cols-2 gap-3">
-          <select
-            value={pozo_form}
-            onChange={(e) => { setPozoForm(e.target.value); setFechaForm(""); }}
-            className="bg-[#0f172a] border border-[#334155] rounded px-3 py-1.5 text-sm text-slate-200 col-span-1"
-          >
-            <option value="">— Elegir pozo —</option>
-            {pozoOpts.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-          <select
-            value={fecha_form}
-            onChange={(e) => setFechaForm(e.target.value)}
-            className="bg-[#0f172a] border border-[#334155] rounded px-3 py-1.5 text-sm text-slate-200"
-            disabled={!pozo_form}
-          >
-            <option value="">— Fecha —</option>
-            {fechaOpts.map((f) => <option key={f} value={f}>{f}</option>)}
-          </select>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <label className="flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={valida_form}
-              onChange={(e) => setValidaForm(e.target.checked)}
-              className="accent-sky-400 w-4 h-4"
-            />
-            Válida
-          </label>
-          <input
-            type="text"
-            placeholder="Comentario"
-            value={comentario_form}
-            onChange={(e) => setComentarioForm(e.target.value)}
-            className="bg-[#0f172a] border border-[#334155] rounded px-3 py-1.5 text-sm text-slate-200 col-span-2"
-          />
-        </div>
-        <div className="flex gap-3 items-center">
-          <button
-            onClick={handleGuardarForm}
-            disabled={!pozo_form || guardandoForm}
-            className="px-4 py-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-40 rounded text-sm font-medium text-white transition-colors"
-          >
-            {guardandoForm ? "Guardando…" : "💾 Guardar comentario"}
-          </button>
-          {okForm && <span className="text-green-400 text-sm">✅ Guardado</span>}
-        </div>
-      </div>
-
       {/* Export */}
       <div className="flex gap-3">
         <button
           onClick={exportCSV}
           className="text-xs px-3 py-1.5 border border-slate-600 rounded text-slate-400 hover:border-sky-400 hover:text-sky-400 transition-colors"
         >
-          ⬇️ Exportar CSV
+          ⬇️ Exportar CSV (incluye comentarios)
         </button>
       </div>
     </div>

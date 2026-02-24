@@ -41,3 +41,8 @@ tr:hover td { background: rgba(56,189,248,0.05); }
   50% { opacity: 0.3; }
 }
 .pulse-dot { animation: pulse-dot 2s infinite; }
+
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}

@@ -6,7 +6,7 @@ import KPICard from "@/components/KPICard";
 import SemaforoAIB from "@/components/SemaforoAIB";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  HistogramLike, ScatterChart, Scatter, Legend,
+  ScatterChart, Scatter, Legend,
 } from "recharts";
 
 const TREND_VARS = ["Sumergencia","PB","NM","NC","ND","%Estructura","%Balance","GPM","Caudal bruto efec"];

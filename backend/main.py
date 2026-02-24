@@ -5,7 +5,7 @@
 #
 # Incluye:
 #   - Configuración CORS para el frontend Next.js
-#   - Registro de todos los routers (din, mapa, validaciones, diagnosticos)
+#   - Registro de todos los routers (din, niv, mapa, validaciones, diagnosticos)
 #   - Health check y endpoint de info
 #   - Manejo global de excepciones
 #   - Startup event (verificación de conexiones)
@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api.din          import router as din_router
+from api.niv          import router as niv_router
 from api.mapa         import router as mapa_router
 from api.validaciones import router as validaciones_router
 from api.diagnosticos import router as diagnosticos_router
@@ -32,19 +33,13 @@ from api.diagnosticos import router as diagnosticos_router
 # Configuración de entorno
 # ==========================================================
 
-# Orígenes permitidos para CORS.
-# En producción: la URL de tu frontend en Cloud Run.
-# En desarrollo: localhost:3000 (Next.js dev server).
 CORS_ORIGINS_ENV = os.environ.get(
     "CORS_ORIGINS",
     "http://localhost:3000,http://localhost:8501"
 )
 CORS_ORIGINS = [o.strip() for o in CORS_ORIGINS_ENV.split(",") if o.strip()]
 
-# Versión de la API (para /api/info)
 API_VERSION = "1.0.0"
-
-# Timestamp de inicio (para uptime en /api/health)
 _START_TIME = time.time()
 
 
@@ -54,17 +49,6 @@ _START_TIME = time.time()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Eventos de startup y shutdown.
-
-    Startup:
-        - Verifica conexión a GCS
-        - Verifica disponibilidad de índices DIN y NIV
-        - Imprime resumen de configuración
-
-    Shutdown:
-        - Log de cierre (Cloud Run maneja el SIGTERM)
-    """
     # --- STARTUP ---
     print("=" * 60)
     print("  Plataforma DINA — Backend FastAPI")
@@ -72,24 +56,18 @@ async def lifespan(app: FastAPI):
     print(f"  Iniciando:   {datetime.now(timezone.utc).isoformat()}")
     print("=" * 60)
 
-    # Verificar variables de entorno críticas
     bucket = os.environ.get("DINAS_BUCKET", "")
     prefix = os.environ.get("DINAS_GCS_PREFIX", "")
     print(f"  GCS Bucket:  {bucket or '⚠️  NO CONFIGURADO'}")
     print(f"  GCS Prefix:  {prefix or '(vacío)'}")
 
-    # Verificar GCS
     try:
         from core.gcs import get_gcs_client
         client = get_gcs_client()
-        if client:
-            print("  GCS Client:  ✅ Conectado")
-        else:
-            print("  GCS Client:  ⚠️  No disponible (modo local)")
+        print(f"  GCS Client:  {'✅ Conectado' if client else '⚠️  No disponible (modo local)'}")
     except Exception as e:
         print(f"  GCS Client:  ❌ Error: {e}")
 
-    # Verificar índices
     try:
         from core.gcs import load_din_index, load_niv_index
         df_din = load_din_index()
@@ -99,7 +77,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"  Índices:     ❌ Error al cargar: {e}")
 
-    # Verificar OpenAI key
     try:
         from ia.diagnostico import get_openai_key
         key = get_openai_key()
@@ -107,7 +84,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"  OpenAI Key:  ❌ Error: {e}")
 
-    # CORS
     print(f"  CORS Origins: {CORS_ORIGINS}")
     print("=" * 60)
 
@@ -151,15 +127,11 @@ app.add_middleware(
 
 
 # ==========================================================
-# Middleware de timing (para logs de latencia)
+# Middleware de timing
 # ==========================================================
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
-    """
-    Agrega el header X-Process-Time a cada respuesta.
-    Útil para monitorear latencia en Cloud Run logs.
-    """
     t0       = time.time()
     response = await call_next(request)
     elapsed  = round((time.time() - t0) * 1000, 2)
@@ -173,10 +145,6 @@ async def add_process_time_header(request: Request, call_next):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """
-    Captura excepciones no manejadas y devuelve JSON estructurado
-    en vez de un 500 genérico de FastAPI.
-    """
     return JSONResponse(
         status_code=500,
         content={
@@ -195,6 +163,12 @@ app.include_router(
     din_router,
     prefix = "/api/din",
     tags   = ["DIN — Cartas dinamométricas"],
+)
+
+app.include_router(
+    niv_router,
+    prefix = "/api/niv",
+    tags   = ["NIV — Niveles de fluido"],
 )
 
 app.include_router(
@@ -222,7 +196,6 @@ app.include_router(
 
 @app.get("/", include_in_schema=False)
 async def root():
-    """Redirect informativo a la documentación."""
     return {
         "mensaje": "Plataforma DINA — Backend API",
         "docs":    "/api/docs",
@@ -232,13 +205,6 @@ async def root():
 
 @app.get("/api/health", tags=["Sistema"])
 async def health_check():
-    """
-    Health check para Cloud Run.
-    Cloud Run llama a este endpoint para verificar que el servicio está vivo.
-
-    Returns:
-        { "status": "ok", "uptime_seg": float, "timestamp": str }
-    """
     return {
         "status":     "ok",
         "uptime_seg": round(time.time() - _START_TIME, 1),
@@ -248,22 +214,6 @@ async def health_check():
 
 @app.get("/api/info", tags=["Sistema"])
 async def get_info():
-    """
-    Información del sistema: versión, configuración GCS,
-    conteo de índices, y disponibilidad de OpenAI.
-
-    Returns:
-        {
-            "version":     str,
-            "gcs_bucket":  str,
-            "gcs_prefix":  str,
-            "gcs_ok":      bool,
-            "openai_ok":   bool,
-            "din_count":   int,
-            "niv_count":   int,
-            "uptime_seg":  float,
-        }
-    """
     from core.gcs import (
         get_gcs_client,
         load_din_index,
@@ -273,14 +223,12 @@ async def get_info():
     )
     from ia.diagnostico import get_openai_key
 
-    # GCS
     try:
         client = get_gcs_client()
         gcs_ok = client is not None
     except Exception:
         gcs_ok = False
 
-    # Índices
     try:
         din_count = len(load_din_index())
         niv_count = len(load_niv_index())
@@ -288,7 +236,6 @@ async def get_info():
         din_count = -1
         niv_count = -1
 
-    # OpenAI
     try:
         openai_ok = bool(get_openai_key())
     except Exception:
@@ -308,13 +255,6 @@ async def get_info():
 
 @app.get("/api/rutas", tags=["Sistema"])
 async def get_rutas():
-    """
-    Lista todas las rutas registradas en la API.
-    Útil para desarrollo y debugging.
-
-    Returns:
-        { "rutas": [{ "path": str, "methods": [str] }] }
-    """
     rutas = []
     for route in app.routes:
         if hasattr(route, "path") and hasattr(route, "methods"):

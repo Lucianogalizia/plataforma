@@ -1,0 +1,95 @@
+version: "3.9"
+
+# ==========================================================
+# docker-compose.yml — Plataforma DINA (desarrollo local)
+#
+# Levanta:
+#   - backend  (FastAPI en :8000)
+#   - frontend (Next.js en :3000)
+#
+# Para producción usar Cloud Run (un servicio por container).
+#
+# USO:
+#   docker-compose up --build
+#   docker-compose up backend   (solo backend)
+#   docker-compose up frontend  (solo frontend)
+# ==========================================================
+
+services:
+
+  # ──────────────────────────────────────────────────────────
+  # Backend FastAPI
+  # ──────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dina-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Variables de entorno (copiá .env.example → .env y completá)
+      - DINAS_BUCKET=${DINAS_BUCKET}
+      - DINAS_GCS_PREFIX=${DINAS_GCS_PREFIX:-interfaz_dinas}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+      - OPENAI_SECRET_NAME=${OPENAI_SECRET_NAME:-OPENAI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CORS_ORIGINS=http://localhost:3000
+    volumes:
+      # Montar credentials de GCP en desarrollo (Application Default Credentials)
+      - ${GOOGLE_APPLICATION_CREDENTIALS:-/dev/null}:/gcp-credentials.json:ro
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - dina-net
+
+  # ──────────────────────────────────────────────────────────
+  # Frontend Next.js
+  # ──────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://backend:8000
+    container_name: dina-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - dina-net
+
+  # ──────────────────────────────────────────────────────────
+  # Scheduler (build_snapshot — corre una vez y termina)
+  # ──────────────────────────────────────────────────────────
+  scheduler:
+    build:
+      context: ./scheduler
+      dockerfile: Dockerfile
+    container_name: dina-scheduler
+    environment:
+      - DINAS_BUCKET=${DINAS_BUCKET}
+      - DINAS_GCS_PREFIX=${DINAS_GCS_PREFIX:-interfaz_dinas}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+    env_file:
+      - .env
+    profiles:
+      - scheduler  # Solo corre con: docker-compose --profile scheduler up scheduler
+    networks:
+      - dina-net
+
+networks:
+  dina-net:
+    driver: bridge

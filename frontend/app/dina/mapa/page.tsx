@@ -11,6 +11,8 @@ export default function MapaPage() {
   const [loading, setLoading] = useState(true);
   const [baterias, setBaterias] = useState<string[]>([]);
   const [batSel, setBatSel] = useState<string[]>([]);
+  const [batSearch, setBatSearch] = useState("");
+  const [batOpen, setBatOpen] = useState(false);
 
   const [sumMin, setSumMin] = useState(0);
   const [sumMax, setSumMax] = useState(5000);
@@ -67,6 +69,13 @@ export default function MapaPage() {
   const puntosConCoords = puntos.filter((p) => p.lat != null && p.lon != null);
   const sumValues = puntosConCoords.map((p) => p.Sumergencia).filter((v) => v != null) as number[];
 
+  const batFiltradas = baterias.filter((b) =>
+    b.toLowerCase().includes(batSearch.toLowerCase())
+  );
+
+  const toggleBat = (b: string) =>
+    setBatSel((prev) => prev.includes(b) ? prev.filter((x) => x !== b) : [...prev, b]);
+
   return (
     <div className="space-y-6">
       <div>
@@ -79,41 +88,80 @@ export default function MapaPage() {
       {/* Filtros */}
       <div className="card space-y-4">
         <h3 className="text-sm font-semibold text-slate-300">Filtros</h3>
-        <div className="flex flex-wrap gap-4">
-          {/* Batería */}
-          <div>
+        <div className="flex flex-wrap gap-6 items-start">
+
+          {/* Batería — picklist */}
+          <div className="relative">
             <label className="text-xs text-slate-400 block mb-1">Batería (nivel_5)</label>
-            <div className="flex flex-wrap gap-1 max-w-md">
-              <button
-                onClick={() => setBatSel(baterias)}
-                className="text-xs px-2 py-0.5 bg-slate-700 text-slate-300 rounded hover:bg-slate-600"
-              >
-                Todas
-              </button>
-              <button
-                onClick={() => setBatSel([])}
-                className="text-xs px-2 py-0.5 bg-slate-700 text-slate-300 rounded hover:bg-slate-600"
-              >
-                Ninguna
-              </button>
-              {baterias.map((b) => (
-                <button
-                  key={b}
-                  onClick={() =>
-                    setBatSel((prev) =>
-                      prev.includes(b) ? prev.filter((x) => x !== b) : [...prev, b]
-                    )
-                  }
-                  className={`text-xs px-2 py-0.5 rounded border transition-colors ${
-                    batSel.includes(b)
-                      ? "bg-sky-500/10 border-sky-500/30 text-sky-300"
-                      : "bg-slate-800 border-slate-600 text-slate-500"
-                  }`}
-                >
-                  {b}
-                </button>
-              ))}
-            </div>
+            <button
+              onClick={() => setBatOpen((o) => !o)}
+              className="flex items-center gap-2 bg-[#0f172a] border border-[#334155] rounded px-3 py-1.5 text-sm text-slate-200 min-w-[200px] hover:border-sky-500 transition-colors"
+            >
+              <span className="flex-1 text-left truncate">
+                {batSel.length === baterias.length
+                  ? "Todas las baterías"
+                  : batSel.length === 0
+                  ? "Ninguna"
+                  : `${batSel.length} seleccionadas`}
+              </span>
+              <span className="text-slate-500 text-xs">{batOpen ? "▲" : "▼"}</span>
+            </button>
+
+            {batOpen && (
+              <div className="absolute z-50 mt-1 w-64 bg-[#1e293b] border border-[#334155] rounded shadow-xl">
+                {/* Buscador */}
+                <div className="p-2 border-b border-[#334155]">
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder="Buscar batería…"
+                    value={batSearch}
+                    onChange={(e) => setBatSearch(e.target.value)}
+                    className="w-full bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-600"
+                  />
+                </div>
+                {/* Acciones rápidas */}
+                <div className="flex gap-1 p-2 border-b border-[#334155]">
+                  <button
+                    onClick={() => setBatSel(baterias)}
+                    className="text-xs px-2 py-0.5 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 flex-1"
+                  >
+                    Todas
+                  </button>
+                  <button
+                    onClick={() => setBatSel([])}
+                    className="text-xs px-2 py-0.5 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 flex-1"
+                  >
+                    Ninguna
+                  </button>
+                </div>
+                {/* Lista */}
+                <div className="overflow-y-auto max-h-52">
+                  {batFiltradas.map((b) => (
+                    <label
+                      key={b}
+                      className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-700/50 cursor-pointer text-xs text-slate-300"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={batSel.includes(b)}
+                        onChange={() => toggleBat(b)}
+                        className="accent-sky-400 w-3 h-3"
+                      />
+                      {b}
+                    </label>
+                  ))}
+                </div>
+                <div className="p-2 border-t border-[#334155]">
+                  <button
+                    onClick={() => setBatOpen(false)}
+                    className="w-full text-xs px-2 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Rango Sumergencia */}
@@ -228,6 +276,7 @@ export default function MapaPage() {
         </div>
       )}
 
+      {/* Tabla — recibe puntos ya filtrados */}
       {puntos.length > 0 && (
         <div className="space-y-4">
           <div className="border-t border-[#334155] pt-6">

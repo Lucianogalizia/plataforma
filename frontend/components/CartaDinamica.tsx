@@ -1,16 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
+import { useEffect, useState, useRef } from "react";
 import api, { OpcionDin, PuntoCS } from "@/lib/api";
 
 interface CartaDinamicaProps {
@@ -29,12 +19,11 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
   const [curvas, setCurvas] = useState<Record<string, PuntoCS[]>>({});
   const [loading, setLoading] = useState(false);
   const [errores, setErrores] = useState<string[]>([]);
-
-  // Usar ref para evitar el loop: curvas en ref no dispara re-renders
+  const chartRef = useRef<HTMLDivElement>(null);
   const curvasRef = useRef(curvas);
   curvasRef.current = curvas;
 
-  const cargarCurvas = useCallback(async (ids: string[]) => {
+  const cargarCurvas = async (ids: string[]) => {
     if (!ids.length) return;
     setLoading(true);
     setErrores([]);
@@ -43,7 +32,6 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
 
     await Promise.all(
       ids.map(async (id) => {
-        // Usar ref para leer curvas sin agregarla como dependencia
         if (curvasRef.current[id]) {
           nuevas[id] = curvasRef.current[id];
           return;
@@ -61,43 +49,82 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
     setCurvas((prev) => ({ ...prev, ...nuevas }));
     setErrores(errs);
     setLoading(false);
-  }, []); // sin dependencias — estable para siempre
+  };
 
   useEffect(() => {
     cargarCurvas(seleccionados);
-  }, [seleccionados, cargarCurvas]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seleccionados]);
 
-  // Combinar todos los puntos para el eje X
-  const allXs = new Set<number>();
-  seleccionados.forEach((id) => {
-    curvas[id]?.forEach((p) => allXs.add(p.X));
-  });
-  const xs = Array.from(allXs).sort((a, b) => a - b);
+  // Renderizar con Plotly cuando cambian curvas o seleccionados
+  useEffect(() => {
+    if (!chartRef.current) return;
+    if (loading) return;
 
-  // Construir data para recharts
-  const chartData = xs.map((x) => {
-    const row: Record<string, unknown> = { X: x };
-    seleccionados.forEach((id, idx) => {
-      const pts = curvas[id];
-      if (!pts) return;
-      const pt = pts.find((p) => p.X === x);
-      const label =
-        opcionesDin.find((o) => o.id === id)?.label || `Medición ${idx + 1}`;
-      row[label] = pt?.Y ?? null;
+    const traces = seleccionados
+      .filter((id) => curvas[id]?.length)
+      .map((id, i) => {
+        const pts = curvas[id];
+        const label = opcionesDin.find((o) => o.id === id)?.label || `Medición ${i + 1}`;
+        return {
+          x: pts.map((p) => p.X),
+          y: pts.map((p) => p.Y),
+          mode: "lines",
+          name: label,
+          line: { color: COLORES[i % COLORES.length], width: 2 },
+          type: "scatter",
+        };
+      });
+
+    if (!traces.length) return;
+
+    const layout = {
+      title: { text: "", font: { color: "#94a3b8" } },
+      xaxis: {
+        title: { text: "X (posición / carrera)", font: { color: "#64748b" } },
+        gridcolor: "#334155",
+        color: "#64748b",
+        tickfont: { color: "#94a3b8", size: 11 },
+        zeroline: false,
+      },
+      yaxis: {
+        title: { text: "Y (carga)", font: { color: "#64748b" } },
+        gridcolor: "#334155",
+        color: "#64748b",
+        tickfont: { color: "#94a3b8", size: 11 },
+        zeroline: false,
+      },
+      paper_bgcolor: "#1e293b",
+      plot_bgcolor: "#0f172a",
+      font: { color: "#94a3b8" },
+      legend: { font: { color: "#94a3b8", size: 12 }, bgcolor: "rgba(0,0,0,0)" },
+      margin: { t: 20, r: 30, b: 60, l: 70 },
+      height: 500,
+      autosize: true,
+    };
+
+    const config = {
+      responsive: true,
+      displayModeBar: true,
+      displaylogo: false,
+      modeBarButtonsToRemove: ["sendDataToCloud", "lasso2d"],
+    };
+
+    // Cargar Plotly dinámicamente
+    import("plotly.js-dist-min").then((Plotly) => {
+      if (chartRef.current) {
+        Plotly.react(chartRef.current, traces, layout, config);
+      }
     });
-    return row;
-  });
-
-  const labels = seleccionados.map(
-    (id, idx) =>
-      opcionesDin.find((o) => o.id === id)?.label || `Medición ${idx + 1}`
-  );
+  }, [curvas, seleccionados, loading, opcionesDin]);
 
   const toggleSeleccion = (id: string) => {
     setSeleccionados((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
   };
+
+  const hayCurvas = seleccionados.some((id) => curvas[id]?.length);
 
   return (
     <div className="space-y-4">
@@ -138,58 +165,23 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
       )}
 
       {loading && (
-        <div className="text-xs text-slate-400 text-center py-4">
+        <div className="text-xs text-slate-400 text-center py-8">
           Cargando carta dinamométrica...
         </div>
       )}
 
-      {!loading && chartData.length > 0 && (
+      {!loading && hayCurvas && (
         <div className="card p-0 overflow-hidden">
           <div className="px-4 py-3 border-b border-[#334155]">
             <h3 className="text-sm font-medium text-slate-300">
               Carta Dinamométrica — Superficie (CS)
             </h3>
           </div>
-          <ResponsiveContainer width="100%" height={520}>
-            <LineChart
-              data={chartData}
-              margin={{ top: 16, right: 32, left: 16, bottom: 16 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis
-                dataKey="X"
-                stroke="#64748b"
-                tick={{ fill: "#94a3b8", fontSize: 11 }}
-                label={{ value: "X (posición / carrera)", position: "insideBottom", offset: -8, fill: "#64748b", fontSize: 12 }}
-              />
-              <YAxis
-                stroke="#64748b"
-                tick={{ fill: "#94a3b8", fontSize: 11 }}
-                label={{ value: "Y (carga)", angle: -90, position: "insideLeft", offset: 8, fill: "#64748b", fontSize: 12 }}
-              />
-              <Tooltip
-                contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
-                labelStyle={{ color: "#94a3b8", fontSize: 11 }}
-                itemStyle={{ fontSize: 12 }}
-              />
-              <Legend wrapperStyle={{ fontSize: 12, color: "#94a3b8" }} />
-              {labels.map((label, i) => (
-                <Line
-                  key={label}
-                  type="monotone"
-                  dataKey={label}
-                  stroke={COLORES[i % COLORES.length]}
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls={false}
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
+          <div ref={chartRef} className="w-full" />
         </div>
       )}
 
-      {!loading && chartData.length === 0 && seleccionados.length > 0 && (
+      {!loading && !hayCurvas && seleccionados.length > 0 && (
         <p className="text-sm text-slate-500 text-center py-8">
           No se encontraron puntos CS para las mediciones seleccionadas.
         </p>

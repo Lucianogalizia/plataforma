@@ -90,7 +90,7 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
     const cols = ["NO_key", "nivel_5", "ORIGEN", "DT_plot_str", "Sumergencia", "PB", "NM", "NC", "ND", "valida", "comentario"];
     const header = cols.join(",");
     const body = rows.map((r) =>
-      cols.map((c) => JSON.stringify((r as Record<string, unknown>)[c] ?? "")).join(",")
+      cols.map((c) => JSON.stringify((r as unknown as Record<string, unknown>)[c] ?? "")).join(",")
     );
     const csv = [header, ...body].join("\n");
     const a = document.createElement("a");

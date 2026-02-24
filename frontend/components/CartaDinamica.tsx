@@ -189,7 +189,7 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
       )}
 
       {!loading && hayCurvas && (
-        <div className="card p-0 overflow-x-hidden max-w-full">
+        <div className="card p-0 overflow-hidden">
           <div className="px-4 py-3 border-b border-[#334155]">
             <h3 className="text-sm font-medium text-slate-300">
               Carta Dinamométrica — Superficie (CS)

@@ -56,6 +56,20 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seleccionados]);
 
+  // ✅ Resize al cambiar tamaño de ventana (evita “achicado” raro de Plotly)
+  useEffect(() => {
+    const onResize = () => {
+      import("plotly.js-dist-min").then((mod) => {
+        const Plotly = mod.default;
+        if (chartRef.current) Plotly.Plots.resize(chartRef.current);
+      });
+    };
+
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // Renderizar con Plotly cuando cambian curvas o seleccionados
   useEffect(() => {
     if (!chartRef.current) return;
     if (loading) return;
@@ -113,7 +127,9 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
     import("plotly.js-dist-min").then((mod) => {
       const Plotly = mod.default;
       if (chartRef.current) {
-        Plotly.react(chartRef.current, traces, layout, config);
+        Plotly.react(chartRef.current, traces, layout, config).then(() => {
+          Plotly.Plots.resize(chartRef.current);
+        });
       }
     });
   }, [curvas, seleccionados, loading, opcionesDin]);
@@ -134,7 +150,7 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
           Seleccioná una o varias mediciones DIN para superponer:
         </p>
 
-        {/* ✅ Solo esta barra scrollea horizontal si no entra */}
+        {/* ✅ Solo esta barra hace scroll horizontal si no entra */}
         <div className="flex gap-2 overflow-x-auto whitespace-nowrap pb-2">
           {opcionesDin.map((op, i) => {
             const sel = seleccionados.includes(op.id);
@@ -173,15 +189,15 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
       )}
 
       {!loading && hayCurvas && (
-        <div className="card p-0 overflow-hidden max-w-full">
+        <div className="card p-0 overflow-x-hidden max-w-full">
           <div className="px-4 py-3 border-b border-[#334155]">
             <h3 className="text-sm font-medium text-slate-300">
               Carta Dinamométrica — Superficie (CS)
             </h3>
           </div>
 
-          {/* ✅ esto evita que el gráfico “rompa” el ancho */}
-          <div ref={chartRef} className="w-full max-w-full overflow-hidden" />
+          {/* ✅ Sin recortar: le damos altura fija al contenedor */}
+          <div ref={chartRef} className="w-full max-w-full" style={{ height: 500 }} />
         </div>
       )}
 

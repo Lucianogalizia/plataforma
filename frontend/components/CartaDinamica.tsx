@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   LineChart,
   Line,
@@ -30,17 +30,22 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
   const [loading, setLoading] = useState(false);
   const [errores, setErrores] = useState<string[]>([]);
 
-  const cargarCurvas = useCallback(async () => {
-    if (!seleccionados.length) return;
+  // Usar ref para evitar el loop: curvas en ref no dispara re-renders
+  const curvasRef = useRef(curvas);
+  curvasRef.current = curvas;
+
+  const cargarCurvas = useCallback(async (ids: string[]) => {
+    if (!ids.length) return;
     setLoading(true);
     setErrores([]);
     const nuevas: Record<string, PuntoCS[]> = {};
     const errs: string[] = [];
 
     await Promise.all(
-      seleccionados.map(async (id) => {
-        if (curvas[id]) {
-          nuevas[id] = curvas[id];
+      ids.map(async (id) => {
+        // Usar ref para leer curvas sin agregarla como dependencia
+        if (curvasRef.current[id]) {
+          nuevas[id] = curvasRef.current[id];
           return;
         }
         try {
@@ -56,11 +61,11 @@ export default function CartaDinamica({ opcionesDin }: CartaDinamicaProps) {
     setCurvas((prev) => ({ ...prev, ...nuevas }));
     setErrores(errs);
     setLoading(false);
-  }, [seleccionados, curvas]);
+  }, []); // sin dependencias — estable para siempre
 
   useEffect(() => {
-    cargarCurvas();
-  }, [cargarCurvas]);
+    cargarCurvas(seleccionados);
+  }, [seleccionados, cargarCurvas]);
 
   // Combinar todos los puntos para el eje X
   const allXs = new Set<number>();

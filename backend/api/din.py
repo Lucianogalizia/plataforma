@@ -95,33 +95,26 @@ def _load_indexes_with_keys():
 
 
 def _df_to_records(df: pd.DataFrame) -> list[dict]:
-    """
-    Convierte un DataFrame a lista de dicts JSON-safe.
-    Convierte NaT/NaN a None y Timestamps a strings ISO.
-    """
     if df is None or df.empty:
         return []
-
+    import math
     df = df.copy()
-
-    # Convertir columnas datetime a string ISO
     for col in df.select_dtypes(include=["datetime64[ns]", "datetimetz"]).columns:
-        df[col] = df[col].dt.strftime("%Y-%m-%dT%H:%M:%S").where(
-            df[col].notna(), None
-        )
-
-    # Convertir Period a string si existe
+        df[col] = df[col].dt.strftime("%Y-%m-%dT%H:%M:%S").where(df[col].notna(), None)
     for col in df.columns:
         if hasattr(df[col], "dt") and hasattr(df[col].dt, "to_timestamp"):
             try:
                 df[col] = df[col].astype(str)
             except Exception:
                 pass
-
-    # Reemplazar NaN/NaT con None
     df = df.where(pd.notnull(df), None)
-
-    return df.to_dict(orient="records")
+    records = df.to_dict(orient="records")
+    # Limpiar NaN/inf que sobreviven en floats
+    def clean(v):
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        return v
+    return [{k: clean(v) for k, v in r.items()} for r in records]
 
 
 # ==========================================================
@@ -661,7 +654,7 @@ async def get_snapshot_mapa(
 
     return {
         "total":  len(m_out),
-        "puntos": m_out.to_dict(orient="records"),
+        "puntos": _df_to_records(m_out),
     }
 
 

@@ -120,16 +120,16 @@ export default function SemaforoAIB({
             <div>
               <label className="text-xs text-slate-400 block mb-1">Rango fechas (DT_plot) — AIB</label>
               <div className="flex gap-2 items-center">
-                <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)}
-                  className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-200"
-                  placeholder="yyyy-mm-dd" />
+                <input type="text" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)}
+                  placeholder="2025-01-01"
+                  className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-200 w-28" />
                 <span className="text-slate-500 text-xs">–</span>
-                <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)}
-                  className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-200"
-                  placeholder="yyyy-mm-dd" />
+                <input type="text" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)}
+                  placeholder="2026-12-31"
+                  className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-200 w-28" />
                 {(fechaDesde || fechaHasta) && (
                   <button onClick={() => { setFechaDesde(""); setFechaHasta(""); }}
-                    className="text-xs text-slate-500 hover:text-red-400 ml-1">✕ Limpiar</button>
+                    className="text-xs text-slate-500 hover:text-red-400 ml-1">✕</button>
                 )}
               </div>
             </div>
@@ -163,6 +163,15 @@ export default function SemaforoAIB({
                 className="bg-[#0f172a] border border-[#334155] rounded px-3 py-1.5 text-sm text-slate-200 w-full" />
             </div>
           ))}
+        </div>
+        <div className="mt-3">
+          <button
+            onClick={() => onRefresh && onRefresh()}
+            className="text-xs px-4 py-1.5 rounded border border-sky-500 text-sky-400 hover:bg-sky-500/10 transition-colors"
+          >
+            ↻ Aplicar umbrales
+          </button>
+          <span className="text-xs text-slate-500 ml-2">Los umbrales se calculan en el servidor</span>
         </div>
       </div>
 

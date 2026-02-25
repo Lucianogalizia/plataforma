@@ -59,7 +59,6 @@ export default function MedicionesPage() {
     return () => window.removeEventListener("dina:pozo", handler);
   }, [cargar]);
 
-  // Columnas presentes en los datos
   const cols = COLS_BASE.filter((c) =>
     mediciones.some((m) => m[c] != null)
   );
@@ -73,7 +72,7 @@ export default function MedicionesPage() {
   }));
 
   return (
-    <div className="space-y-6 w-full min-w-0">
+    <div style={{ width: "100%", minWidth: 0, overflow: "hidden" }} className="space-y-6">
       <div>
         <h2 className="text-xl font-bold text-slate-100">
           📈 Mediciones — Pozo: {pozo || "…"}
@@ -86,25 +85,15 @@ export default function MedicionesPage() {
 
       {!loading && (
         <>
-          {/* KPIs rápidos */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {/* KPIs */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3" style={{ minWidth: 0 }}>
             <KPICard title="Mediciones totales" value={total} color="sky" />
-            <KPICard
-              title="Datos DIN"
-              value={mediciones.filter((m) => m.ORIGEN === "DIN").length}
-            />
-            <KPICard
-              title="Datos NIV"
-              value={mediciones.filter((m) => m.ORIGEN === "NIV").length}
-            />
-            <KPICard
-              title="Con Sumergencia"
-              value={mediciones.filter((m) => m.Sumergencia != null).length}
-              color="green"
-            />
+            <KPICard title="Datos DIN" value={mediciones.filter((m) => m.ORIGEN === "DIN").length} />
+            <KPICard title="Datos NIV" value={mediciones.filter((m) => m.ORIGEN === "NIV").length} />
+            <KPICard title="Con Sumergencia" value={mediciones.filter((m) => m.Sumergencia != null).length} color="green" />
           </div>
 
-          {/* Tabla de mediciones */}
+          {/* Tabla */}
           <div className="card p-0 overflow-hidden">
             <div className="px-4 py-3 border-b border-[#334155] flex items-center justify-between">
               <h3 className="text-sm font-medium text-slate-300">
@@ -112,8 +101,8 @@ export default function MedicionesPage() {
               </h3>
               <span className="text-xs text-slate-500">{total} registros</span>
             </div>
-            <div className="w-full overflow-x-auto" style={{ maxHeight: "20rem" }}>
-              <table className="text-xs min-w-full">
+            <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: "20rem" }}>
+              <table style={{ minWidth: "max-content", width: "100%" }} className="text-xs">
                 <thead className="sticky top-0 z-10">
                   <tr>
                     {cols.map((c) => (
@@ -160,21 +149,11 @@ export default function MedicionesPage() {
                 <ResponsiveContainer width="100%" height={380}>
                   <LineChart data={serieData} margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis
-                      dataKey="dt"
-                      stroke="#64748b"
-                      tick={{ fill: "#94a3b8", fontSize: 11 }}
-                    />
+                    <XAxis dataKey="dt" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 11 }} />
                     <YAxis
                       stroke="#64748b"
                       tick={{ fill: "#94a3b8", fontSize: 11 }}
-                      label={{
-                        value: "Sumergencia (m)",
-                        angle: -90,
-                        position: "insideLeft",
-                        fill: "#64748b",
-                        fontSize: 12,
-                      }}
+                      label={{ value: "Sumergencia (m)", angle: -90, position: "insideLeft", fill: "#64748b", fontSize: 12 }}
                     />
                     <Tooltip
                       contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}

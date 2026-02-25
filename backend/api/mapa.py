@@ -445,12 +445,20 @@ async def get_semaforo_aib_mapa(
     ]
 
     snap_out = snap[keep].copy()
-    snap_out = snap_out.where(pd.notnull(snap_out), None)
+
+    import math, numpy as np
+    # Reemplazar NaN/Inf con None de forma robusta antes de serializar
+    for col in snap_out.columns:
+        snap_out[col] = snap_out[col].apply(
+            lambda v: None if (v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v)))) else v
+        )
+
+    puntos = snap_out.to_dict(orient="records")
 
     return {
-        "total":  len(snap_out),
+        "total":  len(puntos),
         "counts": counts,
-        "puntos": snap_out.to_dict(orient="records"),
+        "puntos": puntos,
     }
 
 

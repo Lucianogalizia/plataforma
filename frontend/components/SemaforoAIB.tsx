@@ -59,7 +59,7 @@ export default function SemaforoAIB({
 }: SemaforoAIBProps) {
   const [filtro, setFiltro]           = useState("Todos");
   const [origenSel, setOrigenSel]     = useState<string[]>([]);
-  const [soloSeAib, setSoloSeAib]     = useState(true);
+  const [soloSeAib, setSoloSeAib]     = useState(false);
   const [soloConLlen, setSoloConLlen] = useState(false);
   const [fechaDesde, setFechaDesde]   = useState("");
   const [fechaHasta, setFechaHasta]   = useState("");
@@ -71,8 +71,8 @@ export default function SemaforoAIB({
   if (origenSel.length > 0) rowsFiltradas = rowsFiltradas.filter((r) => origenSel.includes(r.ORIGEN || ""));
   if (soloSeAib)    rowsFiltradas = rowsFiltradas.filter((r) => r.SE?.trim().toUpperCase() === "AIB");
   if (soloConLlen)  rowsFiltradas = rowsFiltradas.filter((r) => r["Bba Llenado"] != null);
-  if (fechaDesde)   rowsFiltradas = rowsFiltradas.filter((r) => !r.DT_plot || r.DT_plot >= fechaDesde);
-  if (fechaHasta)   rowsFiltradas = rowsFiltradas.filter((r) => !r.DT_plot || r.DT_plot <= fechaHasta + "T23:59:59");
+  if (fechaDesde)   rowsFiltradas = rowsFiltradas.filter((r) => !r.DT_plot || r.DT_plot.slice(0,10) >= fechaDesde);
+  if (fechaHasta)   rowsFiltradas = rowsFiltradas.filter((r) => !r.DT_plot || r.DT_plot.slice(0,10) <= fechaHasta);
 
   const totalAib = rowsFiltradas.filter((r) => r.SE?.trim().toUpperCase() === "AIB").length;
   const normales = rowsFiltradas.filter((r) => r.Semaforo_AIB === "🟢 NORMAL").length;
@@ -121,10 +121,16 @@ export default function SemaforoAIB({
               <label className="text-xs text-slate-400 block mb-1">Rango fechas (DT_plot) — AIB</label>
               <div className="flex gap-2 items-center">
                 <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)}
-                  className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-200" />
+                  className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-200"
+                  placeholder="yyyy-mm-dd" />
                 <span className="text-slate-500 text-xs">–</span>
                 <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)}
-                  className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-200" />
+                  className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-200"
+                  placeholder="yyyy-mm-dd" />
+                {(fechaDesde || fechaHasta) && (
+                  <button onClick={() => { setFechaDesde(""); setFechaHasta(""); }}
+                    className="text-xs text-slate-500 hover:text-red-400 ml-1">✕ Limpiar</button>
+                )}
               </div>
             </div>
             <div className="flex flex-col gap-2">

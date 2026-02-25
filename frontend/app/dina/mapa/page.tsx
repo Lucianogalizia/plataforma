@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import api, { PuntoMapa } from "@/lib/api";
 import MapaSumergencia from "@/components/MapaSumergencia";
 import TablaValidaciones from "@/components/TablaValidaciones";
 import KPICard from "@/components/KPICard";
-import { useQuery } from "@tanstack/react-query";
-
-type FiltroVal = "Todos" | "Solo validadas" | "Solo no validadas";
 
 export default function MapaPage() {
+  const [puntos, setPuntos] = useState<PuntoMapa[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [baterias, setBaterias] = useState<string[]>([]);
   const [batSel, setBatSel] = useState<string[]>([]);
   const [batSearch, setBatSearch] = useState("");
   const [batOpen, setBatOpen] = useState(false);
@@ -19,189 +19,274 @@ export default function MapaPage() {
   const [diasMin, setDiasMin] = useState(0);
   const [diasMax, setDiasMax] = useState(9999);
 
-  const [filtroVal, setFiltroVal] = useState<FiltroVal>("Todos");
+  const [filtroVal, setFiltroVal] = useState<"Todos" | "Solo validadas" | "Solo no validadas">("Todos");
 
-  // 1) Baterías (cacheado)
-  const bateriasQ = useQuery({
-    queryKey: ["mapa", "baterias"],
-    queryFn: () => api.getBaterias(),
-    staleTime: 10 * 60_000, // baterías rara vez cambian
-  });
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [mapa, bats] = await Promise.all([
+        api.getSnapshotMapa({
+          sum_min: sumMin, sum_max: sumMax,
+          dias_min: diasMin, dias_max: diasMax,
+          baterias: batSel.join(","),
+        }),
+        api.getBaterias(),
+      ]);
+      let pts = mapa.puntos;
 
-  const baterias = useMemo(() => {
-    const raw = bateriasQ.data?.baterias ?? [];
-    return raw.map((b: any) => (typeof b === "string" ? b : b.nombre)).filter(Boolean);
-  }, [bateriasQ.data]);
+      if (filtroVal === "Solo no validadas") {
+        pts = pts.filter((p) => p.Sumergencia != null && p.Sumergencia < 0);
+      }
 
-  // Seleccionar todas por defecto solo 1 vez
-  const initedRef = useRef(false);
+      setPuntos(pts);
+      if (bats.baterias && batSel.length === 0) {
+        const nombres = bats.baterias.map((b: { nombre: string } | string) =>
+          typeof b === "string" ? b : b.nombre
+        );
+        setBaterias(nombres);
+        setBatSel(nombres);
+      }
+    } catch {
+      setPuntos([]);
+    }
+    setLoading(false);
+  }, [sumMin, sumMax, diasMin, diasMax, batSel, filtroVal]);
+
   useEffect(() => {
-    if (initedRef.current) return;
-    if (!baterias.length) return;
-    setBatSel(baterias);
-    initedRef.current = true;
-  }, [baterias]);
+    api.getBaterias()
+      .then((r) => {
+        const nombres = (r.baterias || []).map((b: { nombre: string } | string) =>
+          typeof b === "string" ? b : b.nombre
+        );
+        setBaterias(nombres);
+        setBatSel(nombres);
+      })
+      .catch(() => {})
+      .finally(() => cargar());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // 2) Puntos del mapa (cacheado por filtros)
-  const puntosQ = useQuery({
-    queryKey: [
-      "mapa",
-      "puntos",
-      { sumMin, sumMax, diasMin, diasMax, baterias: batSel.join(","), filtroVal }
-    ],
-    queryFn: async () => {
-      const solo_validadas =
-        filtroVal === "Todos" ? undefined : filtroVal === "Solo validadas";
+  const puntosConCoords = puntos.filter((p) => p.lat != null && p.lon != null);
+  const sumValues = puntosConCoords.map((p) => p.Sumergencia).filter((v) => v != null) as number[];
 
-      const res = await api.getSnapshotMapa({
-        sum_min: sumMin,
-        sum_max: sumMax,
-        dias_min: diasMin,
-        dias_max: diasMax,
-        baterias: batSel.join(","),
-        solo_validadas,
-      });
+  const batFiltradas = baterias.filter((b) =>
+    b.toLowerCase().includes(batSearch.toLowerCase())
+  );
 
-      return (res.puntos ?? []) as PuntoMapa[];
-    },
-    enabled: batSel.length > 0, // no pedir hasta que haya selección
-    keepPreviousData: true,     // evita parpadeo al cambiar filtros
-  });
-
-  const puntos = puntosQ.data ?? [];
-  const loading = bateriasQ.isLoading || puntosQ.isLoading;
-
-  // Filtro de búsqueda de baterías para el dropdown
-  const batsFiltradas = useMemo(() => {
-    const q = batSearch.trim().toLowerCase();
-    if (!q) return baterias;
-    return baterias.filter((b) => b.toLowerCase().includes(q));
-  }, [baterias, batSearch]);
-
-  // KPIs simples
-  const kpiTotal = puntos.length;
-  const kpiValidadas = useMemo(() => puntos.filter((p) => p.validada !== false).length, [puntos]);
-  const kpiNoVal = kpiTotal - kpiValidadas;
-
-  const toggleBat = (b: string) => {
-    setBatSel((prev) => (prev.includes(b) ? prev.filter((x) => x !== b) : [...prev, b]));
-  };
-
-  const selectAll = () => setBatSel(baterias);
-  const clearAll = () => setBatSel([]);
+  const toggleBat = (b: string) =>
+    setBatSel((prev) => prev.includes(b) ? prev.filter((x) => x !== b) : [...prev, b]);
 
   return (
-    <div className="p-6 space-y-4">
-      <div className="flex flex-wrap gap-3 items-center">
-        <div className="relative">
-          <button
-            onClick={() => setBatOpen((s) => !s)}
-            className="px-3 py-2 rounded bg-slate-200/10 border border-[#334155] text-slate-200 text-sm"
-          >
-            Baterías ({batSel.length}/{baterias.length})
-          </button>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-bold text-slate-100">
+          🗺️ Mapa de Sumergencia — heatmap densidad
+        </h2>
+        <p className="text-slate-400 text-sm mt-1">Última medición por pozo</p>
+      </div>
 
-          {batOpen && (
-            <div className="absolute z-20 mt-2 w-80 rounded border border-[#334155] bg-[#0f172a] p-3 shadow">
+      {/* Filtros */}
+      <div className="card space-y-4">
+        <h3 className="text-sm font-semibold text-slate-300">Filtros</h3>
+        <div className="flex flex-wrap gap-6 items-start">
+
+          {/* Batería — picklist */}
+          <div className="relative">
+            <label className="text-xs text-slate-400 block mb-1">Batería (nivel_5)</label>
+            <button
+              onClick={() => setBatOpen((o) => !o)}
+              className="flex items-center gap-2 bg-[#0f172a] border border-[#334155] rounded px-3 py-1.5 text-sm text-slate-200 min-w-[200px] hover:border-sky-500 transition-colors"
+            >
+              <span className="flex-1 text-left truncate">
+                {batSel.length === baterias.length
+                  ? "Todas las baterías"
+                  : batSel.length === 0
+                  ? "Ninguna"
+                  : `${batSel.length} seleccionadas`}
+              </span>
+              <span className="text-slate-500 text-xs">{batOpen ? "▲" : "▼"}</span>
+            </button>
+
+            {batOpen && (
+              <div className="absolute z-50 mt-1 w-64 bg-[#1e293b] border border-[#334155] rounded shadow-xl">
+                {/* Buscador */}
+                <div className="p-2 border-b border-[#334155]">
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder="Buscar batería…"
+                    value={batSearch}
+                    onChange={(e) => setBatSearch(e.target.value)}
+                    className="w-full bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-600"
+                  />
+                </div>
+                {/* Acciones rápidas */}
+                <div className="flex gap-1 p-2 border-b border-[#334155]">
+                  <button
+                    onClick={() => setBatSel(baterias)}
+                    className="text-xs px-2 py-0.5 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 flex-1"
+                  >
+                    Todas
+                  </button>
+                  <button
+                    onClick={() => setBatSel([])}
+                    className="text-xs px-2 py-0.5 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 flex-1"
+                  >
+                    Ninguna
+                  </button>
+                </div>
+                {/* Lista */}
+                <div className="overflow-y-auto max-h-52">
+                  {batFiltradas.map((b) => (
+                    <label
+                      key={b}
+                      className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-700/50 cursor-pointer text-xs text-slate-300"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={batSel.includes(b)}
+                        onChange={() => toggleBat(b)}
+                        className="accent-sky-400 w-3 h-3"
+                      />
+                      {b}
+                    </label>
+                  ))}
+                </div>
+                <div className="p-2 border-t border-[#334155]">
+                  <button
+                    onClick={() => setBatOpen(false)}
+                    className="w-full text-xs px-2 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Rango Sumergencia */}
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">
+              Rango Sumergencia: {sumMin} – {sumMax}
+            </label>
+            <div className="flex gap-2">
               <input
-                value={batSearch}
-                onChange={(e) => setBatSearch(e.target.value)}
-                placeholder="Buscar batería…"
-                className="w-full mb-2 px-2 py-1 rounded bg-[#0b1220] border border-[#334155] text-slate-200 text-sm"
+                type="number" value={sumMin}
+                onChange={(e) => setSumMin(+e.target.value)}
+                className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200 w-24"
+                placeholder="Min"
               />
-
-              <div className="flex gap-2 mb-2">
-                <button
-                  onClick={selectAll}
-                  className="text-xs px-2 py-1 rounded bg-slate-200/10 border border-[#334155] text-slate-200"
-                >
-                  Seleccionar todas
-                </button>
-                <button
-                  onClick={clearAll}
-                  className="text-xs px-2 py-1 rounded bg-slate-200/10 border border-[#334155] text-slate-200"
-                >
-                  Limpiar
-                </button>
-              </div>
-
-              <div className="max-h-64 overflow-auto space-y-1 pr-1">
-                {batsFiltradas.map((b) => (
-                  <label key={b} className="flex items-center gap-2 text-sm text-slate-200">
-                    <input
-                      type="checkbox"
-                      checked={batSel.includes(b)}
-                      onChange={() => toggleBat(b)}
-                    />
-                    <span>{b}</span>
-                  </label>
-                ))}
-              </div>
+              <input
+                type="number" value={sumMax}
+                onChange={(e) => setSumMax(+e.target.value)}
+                className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200 w-24"
+                placeholder="Max"
+              />
             </div>
-          )}
+          </div>
+
+          {/* Rango Días */}
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">
+              Días desde última: {diasMin} – {diasMax}
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="number" value={diasMin}
+                onChange={(e) => setDiasMin(+e.target.value)}
+                className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200 w-24"
+              />
+              <input
+                type="number" value={diasMax}
+                onChange={(e) => setDiasMax(+e.target.value)}
+                className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200 w-24"
+              />
+            </div>
+          </div>
+
+          {/* Filtro validación */}
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">Filtrar por validación</label>
+            <div className="flex gap-2">
+              {(["Todos", "Solo validadas", "Solo no validadas"] as const).map((op) => (
+                <button
+                  key={op}
+                  onClick={() => setFiltroVal(op)}
+                  className={`text-xs px-2 py-1 rounded border transition-colors ${
+                    filtroVal === op
+                      ? "bg-sky-500/10 border-sky-400 text-sky-300"
+                      : "border-slate-600 text-slate-400 hover:border-slate-400"
+                  }`}
+                >
+                  {op}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 items-center">
-          <label className="text-xs text-slate-400">Sum min</label>
-          <input
-            type="number"
-            value={sumMin}
-            onChange={(e) => setSumMin(Number(e.target.value))}
-            className="w-24 px-2 py-1 rounded bg-[#0f172a] border border-[#334155] text-slate-200 text-sm"
-          />
+        <button
+          onClick={cargar}
+          disabled={loading}
+          className="px-4 py-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-40 rounded text-sm font-medium text-white transition-colors"
+        >
+          {loading ? "Cargando…" : "🔄 Aplicar filtros"}
+        </button>
+      </div>
 
-          <label className="text-xs text-slate-400">Sum max</label>
-          <input
-            type="number"
-            value={sumMax}
-            onChange={(e) => setSumMax(Number(e.target.value))}
-            className="w-24 px-2 py-1 rounded bg-[#0f172a] border border-[#334155] text-slate-200 text-sm"
-          />
+      {/* KPIs */}
+      <div className="grid grid-cols-3 gap-3">
+        <KPICard title="Pozos con coords" value={puntosConCoords.length} color="sky" />
+        <KPICard
+          title="Sumer. máx"
+          value={sumValues.length ? Math.max(...sumValues).toFixed(0) + " m" : "—"}
+          color="red"
+        />
+        <KPICard
+          title="Sumer. media"
+          value={
+            sumValues.length
+              ? (sumValues.reduce((a, b) => a + b, 0) / sumValues.length).toFixed(0) + " m"
+              : "—"
+          }
+          color="sky"
+        />
+      </div>
 
-          <label className="text-xs text-slate-400">Días min</label>
-          <input
-            type="number"
-            value={diasMin}
-            onChange={(e) => setDiasMin(Number(e.target.value))}
-            className="w-24 px-2 py-1 rounded bg-[#0f172a] border border-[#334155] text-slate-200 text-sm"
-          />
+      {loading && (
+        <p className="text-slate-500 text-sm animate-pulse">Cargando mapa…</p>
+      )}
 
-          <label className="text-xs text-slate-400">Días max</label>
-          <input
-            type="number"
-            value={diasMax}
-            onChange={(e) => setDiasMax(Number(e.target.value))}
-            className="w-24 px-2 py-1 rounded bg-[#0f172a] border border-[#334155] text-slate-200 text-sm"
-          />
-
-          <select
-            value={filtroVal}
-            onChange={(e) => setFiltroVal(e.target.value as FiltroVal)}
-            className="px-2 py-1 rounded bg-[#0f172a] border border-[#334155] text-slate-200 text-sm"
-          >
-            <option>Todos</option>
-            <option>Solo validadas</option>
-            <option>Solo no validadas</option>
-          </select>
+      {!loading && puntosConCoords.length > 0 && (
+        <div className="card p-0 overflow-hidden">
+          <div className="px-4 py-3 border-b border-[#334155]">
+            <h3 className="text-sm font-medium text-slate-300">
+              Heatmap de Sumergencia — {puntosConCoords.length} pozos
+            </h3>
+          </div>
+          <div className="p-2">
+            <MapaSumergencia puntos={puntosConCoords} height={520} />
+          </div>
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <KPICard title="Puntos" value={kpiTotal} />
-        <KPICard title="Validadas" value={kpiValidadas} />
-        <KPICard title="No validadas" value={kpiNoVal} />
-      </div>
-
-      {bateriasQ.isError && (
-        <div className="text-sm text-red-300">Error cargando baterías.</div>
-      )}
-      {puntosQ.isError && (
-        <div className="text-sm text-red-300">Error cargando puntos del mapa.</div>
       )}
 
-      <MapaSumergencia puntos={puntos} loading={loading} />
+      {!loading && puntosConCoords.length === 0 && (
+        <div className="card text-center text-slate-500 text-sm py-8">
+          No hay pozos con coordenadas para los filtros seleccionados.
+        </div>
+      )}
 
-      <TablaValidaciones puntos={puntos} />
+      {/* Tabla — recibe puntos ya filtrados */}
+      {puntos.length > 0 && (
+        <div className="space-y-4">
+          <div className="border-t border-[#334155] pt-6">
+            <h3 className="text-base font-semibold text-slate-200 mb-4">
+              📋 Pozos filtrados — selección, validación y exportación
+            </h3>
+            <TablaValidaciones pozos={puntos} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

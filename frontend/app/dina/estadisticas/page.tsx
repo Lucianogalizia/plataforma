@@ -114,15 +114,16 @@ export default function EstadisticasPage() {
     } catch {}
   }, [cobFrom, cobTo, cobModo]);
 
-  const loadSemaforo = useCallback(async () => {
+  const loadSemaforo = useCallback(async (sm = sumMedia, sa = sumAlta, lo = llenOk, lb = llenBajo) => {
     try {
       const res = await api.getSemaforoAib({
-        sum_media: sumMedia, sum_alta: sumAlta,
-        llen_ok: llenOk, llen_bajo: llenBajo, solo_se_aib: true
+        sum_media: sm, sum_alta: sa,
+        llen_ok: lo, llen_bajo: lb, solo_se_aib: true
       });
       setSemaforoData(res);
     } catch {}
-  }, [sumMedia, sumAlta, llenOk, llenBajo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => { loadSnap(); loadPpm(); }, [loadSnap, loadPpm]);
   useEffect(() => { loadTend(); }, [loadTend]);
@@ -667,21 +668,19 @@ export default function EstadisticasPage() {
       <div className="border-t border-[#334155] pt-8">
         <h2 className="text-lg font-bold text-slate-100 mb-4">🚦 Semáforo AIB (SE = AIB)</h2>
 
-        {semaforoData && (
-          <SemaforoAIB
-            rows={semaforoData.rows}
+        <SemaforoAIB
+            rows={semaforoData?.rows ?? []}
             kpis={{
-              total:    semaforoData.total,
-              criticos: semaforoData.criticos,
-              alertas:  semaforoData.alertas,
-              normales: semaforoData.normales,
-              sin_datos:semaforoData.sin_datos,
+              total:    semaforoData?.total    ?? 0,
+              criticos: semaforoData?.criticos ?? 0,
+              alertas:  semaforoData?.alertas  ?? 0,
+              normales: semaforoData?.normales ?? 0,
+              sin_datos:semaforoData?.sin_datos ?? 0,
             }}
-            onRefresh={loadSemaforo}
+            onRefresh={() => loadSemaforo(sumMedia, sumAlta, llenOk, llenBajo)}
             sumMedia={sumMedia} sumAlta={sumAlta} llenOk={llenOk} llenBajo={llenBajo}
             setSumMedia={setSumMedia} setSumAlta={setSumAlta} setLlenOk={setLlenOk} setLlenBajo={setLlenBajo}
           />
-        )}
       </div>
     </div>
   );

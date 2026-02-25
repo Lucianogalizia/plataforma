@@ -18,9 +18,32 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
+import math
+import json as _json
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+
+def _clean_nans(o):
+    """Recursivamente reemplaza NaN/Inf por None para serialización JSON segura."""
+    if isinstance(o, float) and (math.isnan(o) or math.isinf(o)):
+        return None
+    if isinstance(o, dict):
+        return {k: _clean_nans(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_clean_nans(v) for v in o]
+    return o
+
+
+class NanSafeJSONResponse(JSONResponse):
+    def render(self, content) -> bytes:
+        return _json.dumps(
+            _clean_nans(content),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
 
 from api.din          import router as din_router
 from api.niv          import router as niv_router
@@ -105,11 +128,12 @@ app = FastAPI(
         "Gestiona cartas dinamométricas, sumergencias, diagnósticos IA "
         "y validaciones de pozos petroleros."
     ),
-    version     = API_VERSION,
-    docs_url    = "/api/docs",
-    redoc_url   = "/api/redoc",
-    openapi_url = "/api/openapi.json",
-    lifespan    = lifespan,
+    version          = API_VERSION,
+    docs_url         = "/api/docs",
+    redoc_url        = "/api/redoc",
+    openapi_url      = "/api/openapi.json",
+    lifespan         = lifespan,
+    default_response_class = NanSafeJSONResponse,
 )
 
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import KPICard from "./KPICard";
 import { SemaforoRow } from "@/lib/api";
 
@@ -12,10 +12,21 @@ const SEV_COLOR: Record<string, string> = {
   "NO APLICA":   "bg-slate-700/10  text-slate-500  border-slate-700/30",
 };
 
-const TABLE_HEADERS = [
-  "Estado","NO_key","ORIGEN","DT_plot","Días","SE",
-  "PB","Sumergencia","Bba Llenado","Sumergencia_base",
-  "%Estructura","%Balance","GPM","Caudal bruto efec"
+const TABLE_COLS: { key: keyof SemaforoRow | "Semaforo_AIB"; label: string }[] = [
+  { key: "Semaforo_AIB",      label: "Estado" },
+  { key: "NO_key",            label: "NO_key" },
+  { key: "ORIGEN",            label: "ORIGEN" },
+  { key: "DT_plot",           label: "DT_plot" },
+  { key: "Dias_desde_ultima", label: "Días" },
+  { key: "SE",                label: "SE" },
+  { key: "PB",                label: "PB" },
+  { key: "Sumergencia",       label: "Sumergencia" },
+  { key: "Bba Llenado",       label: "Bba Llenado" },
+  { key: "Sumergencia_base",  label: "Sumergencia_base" },
+  { key: "%Estructura",       label: "%Estructura" },
+  { key: "%Balance",          label: "%Balance" },
+  { key: "GPM",               label: "GPM" },
+  { key: "Caudal bruto efec", label: "Caudal bruto efec" },
 ];
 
 interface SemaforoAIBProps {
@@ -25,6 +36,29 @@ interface SemaforoAIBProps {
   sumMedia: number; sumAlta: number; llenOk: number; llenBajo: number;
   setSumMedia: (v: number) => void; setSumAlta: (v: number) => void;
   setLlenOk: (v: number) => void;  setLlenBajo: (v: number) => void;
+}
+
+function SortableTableHeader({
+  cols, sortKey, sortAsc, onSort,
+}: {
+  cols: typeof TABLE_COLS;
+  sortKey: string | null;
+  sortAsc: boolean;
+  onSort: (k: string) => void;
+}) {
+  return (
+    <thead className="sticky top-0 z-10">
+      <tr>
+        {cols.map((c) => (
+          <th key={c.key}
+            onClick={() => onSort(c.key)}
+            className="text-left text-xs text-slate-500 px-3 py-2.5 bg-[#1e293b] border-b border-[#334155] whitespace-nowrap cursor-pointer select-none hover:text-sky-400 transition-colors">
+            {c.label}{sortKey === c.key ? (sortAsc ? " ▲" : " ▼") : " ↕"}
+          </th>
+        ))}
+      </tr>
+    </thead>
+  );
 }
 
 function TableRow({ r }: { r: SemaforoRow }) {
@@ -52,6 +86,47 @@ function TableRow({ r }: { r: SemaforoRow }) {
   );
 }
 
+function useSortedRows(rows: SemaforoRow[]) {
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortAsc, setSortAsc] = useState(true);
+
+  const sorted = useMemo(() => {
+    if (!sortKey) return rows;
+    return [...rows].sort((a, b) => {
+      const av = (a as any)[sortKey];
+      const bv = (b as any)[sortKey];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "number" && typeof bv === "number") return sortAsc ? av - bv : bv - av;
+      return sortAsc ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+    });
+  }, [rows, sortKey, sortAsc]);
+
+  function handleSort(key: string) {
+    if (sortKey === key) setSortAsc((a) => !a);
+    else { setSortKey(key); setSortAsc(true); }
+  }
+
+  return { sorted, sortKey, sortAsc, handleSort };
+}
+
+function downloadCSV(rows: SemaforoRow[], filename: string) {
+  const keys = TABLE_COLS.map((c) => c.key);
+  const header = TABLE_COLS.map((c) => c.label).join(",");
+  const body = rows.map((r) =>
+    keys.map((k) => {
+      const v = (r as any)[k];
+      const s = v == null ? "" : String(v);
+      return s.includes(",") ? `"${s}"` : s;
+    }).join(",")
+  ).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([header + "\n" + body], { type: "text/csv" }));
+  a.download = filename;
+  a.click();
+}
+
 export default function SemaforoAIB({
   rows, kpis, onRefresh,
   sumMedia, sumAlta, llenOk, llenBajo,
@@ -65,14 +140,17 @@ export default function SemaforoAIB({
   const [fechaHasta, setFechaHasta]   = useState("");
   const [filtrosOpen, setFiltrosOpen] = useState(true);
 
+  const critSort = useSortedRows([]);
+  const tablaSort = useSortedRows([]);
+
   const origenOpts = [...new Set(rows.map((r) => r.ORIGEN).filter(Boolean) as string[])].sort();
 
   let rowsFiltradas = [...rows];
   if (origenSel.length > 0) rowsFiltradas = rowsFiltradas.filter((r) => origenSel.includes(r.ORIGEN || ""));
-  if (soloSeAib)    rowsFiltradas = rowsFiltradas.filter((r) => r.SE?.trim().toUpperCase() === "AIB");
-  if (soloConLlen)  rowsFiltradas = rowsFiltradas.filter((r) => r["Bba Llenado"] != null);
-  if (fechaDesde)   rowsFiltradas = rowsFiltradas.filter((r) => !r.DT_plot || r.DT_plot.slice(0,10) >= fechaDesde);
-  if (fechaHasta)   rowsFiltradas = rowsFiltradas.filter((r) => !r.DT_plot || r.DT_plot.slice(0,10) <= fechaHasta);
+  if (soloSeAib)   rowsFiltradas = rowsFiltradas.filter((r) => r.SE?.trim().toUpperCase() === "AIB");
+  if (soloConLlen) rowsFiltradas = rowsFiltradas.filter((r) => r["Bba Llenado"] != null);
+  if (fechaDesde)  rowsFiltradas = rowsFiltradas.filter((r) => !r.DT_plot || r.DT_plot.slice(0,10) >= fechaDesde);
+  if (fechaHasta)  rowsFiltradas = rowsFiltradas.filter((r) => !r.DT_plot || r.DT_plot.slice(0,10) <= fechaHasta);
 
   const totalAib = rowsFiltradas.filter((r) => r.SE?.trim().toUpperCase() === "AIB").length;
   const normales = rowsFiltradas.filter((r) => r.Semaforo_AIB === "🟢 NORMAL").length;
@@ -80,22 +158,62 @@ export default function SemaforoAIB({
   const criticos = rowsFiltradas.filter((r) => r.Semaforo_AIB === "🔴 CRÍTICO").length;
   const sinDatos = rowsFiltradas.filter((r) => r.Semaforo_AIB === "SIN DATOS").length;
 
-  const criticosRows = rowsFiltradas
+  const criticosBase = rowsFiltradas
     .filter((r) => r.Semaforo_AIB === "🔴 CRÍTICO")
     .sort((a, b) => (b.Sumergencia ?? 0) - (a.Sumergencia ?? 0));
 
   const opciones = ["Todos", "🔴 CRÍTICO", "🟡 ALERTA", "🟢 NORMAL", "SIN DATOS"];
-  const filtered = filtro === "Todos" ? rowsFiltradas : rowsFiltradas.filter((r) => r.Semaforo_AIB === filtro);
+  const tablaBase = filtro === "Todos" ? rowsFiltradas : rowsFiltradas.filter((r) => r.Semaforo_AIB === filtro);
+
+  // Sort estados críticos
+  const [critSortKey, setCritSortKey] = useState<string | null>(null);
+  const [critSortAsc, setCritSortAsc] = useState(true);
+  const criticosSorted = useMemo(() => {
+    if (!critSortKey) return criticosBase;
+    return [...criticosBase].sort((a, b) => {
+      const av = (a as any)[critSortKey];
+      const bv = (b as any)[critSortKey];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "number" && typeof bv === "number") return critSortAsc ? av - bv : bv - av;
+      return critSortAsc ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+    });
+  }, [criticosBase, critSortKey, critSortAsc]);
+
+  function handleCritSort(key: string) {
+    if (critSortKey === key) setCritSortAsc((a) => !a);
+    else { setCritSortKey(key); setCritSortAsc(true); }
+  }
+
+  // Sort tabla completa
+  const [tablaSortKey, setTablaSortKey] = useState<string | null>(null);
+  const [tablaSortAsc, setTablaSortAsc] = useState(true);
+  const tablaSorted = useMemo(() => {
+    if (!tablaSortKey) return tablaBase;
+    return [...tablaBase].sort((a, b) => {
+      const av = (a as any)[tablaSortKey];
+      const bv = (b as any)[tablaSortKey];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "number" && typeof bv === "number") return tablaSortAsc ? av - bv : bv - av;
+      return tablaSortAsc ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+    });
+  }, [tablaBase, tablaSortKey, tablaSortAsc]);
+
+  function handleTablaSort(key: string) {
+    if (tablaSortKey === key) setTablaSortAsc((a) => !a);
+    else { setTablaSortKey(key); setTablaSortAsc(true); }
+  }
 
   return (
     <div className="space-y-4">
 
       {/* Filtros independientes */}
       <div className="card">
-        <button
-          onClick={() => setFiltrosOpen((o) => !o)}
-          className="flex items-center gap-2 text-sm font-semibold text-slate-300 w-full text-left"
-        >
+        <button onClick={() => setFiltrosOpen((o) => !o)}
+          className="flex items-center gap-2 text-sm font-semibold text-slate-300 w-full text-left">
           <span>{filtrosOpen ? "▼" : "▶"}</span>
           Filtros Semáforo AIB (independientes)
         </button>
@@ -165,17 +283,15 @@ export default function SemaforoAIB({
           ))}
         </div>
         <div className="mt-3">
-          <button
-            onClick={() => onRefresh && onRefresh()}
-            className="text-xs px-4 py-1.5 rounded border border-sky-500 text-sky-400 hover:bg-sky-500/10 transition-colors"
-          >
+          <button onClick={() => onRefresh && onRefresh()}
+            className="text-xs px-4 py-1.5 rounded border border-sky-500 text-sky-400 hover:bg-sky-500/10 transition-colors">
             ↻ Aplicar umbrales
           </button>
           <span className="text-xs text-slate-500 ml-2">Los umbrales se calculan en el servidor</span>
         </div>
       </div>
 
-      {/* KPIs recalculados */}
+      {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <KPICard title="Pozos AIB (independiente)" value={totalAib} />
         <KPICard title="🟢 Normal"  value={normales} color="green" />
@@ -185,19 +301,27 @@ export default function SemaforoAIB({
       </div>
 
       {/* Tabla críticos */}
-      {criticosRows.length > 0 ? (
+      {criticosSorted.length > 0 ? (
         <div className="card p-0 overflow-hidden">
-          <div className="px-4 py-3 border-b border-[#334155]">
+          <div className="px-4 py-3 border-b border-[#334155] flex items-center justify-between">
             <h3 className="text-sm font-medium text-red-400">🔴 AIB Crítico — prioridad (independiente)</h3>
+            <div className="flex gap-2">
+              {critSortKey && (
+                <button onClick={() => { setCritSortKey(null); setCritSortAsc(true); }}
+                  className="text-xs px-2 py-1 rounded border border-slate-600 text-slate-400 hover:border-red-400 hover:text-red-400 transition-colors">
+                  ✕ orden
+                </button>
+              )}
+              <button onClick={() => downloadCSV(criticosSorted, "semaforo_criticos.csv")}
+                className="text-xs px-2 py-1 rounded border border-slate-600 text-slate-400 hover:border-sky-400 hover:text-sky-400 transition-colors">
+                ⬇ CSV
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto overflow-y-auto max-h-72">
             <table className="w-full text-xs">
-              <thead className="sticky top-0 z-10">
-                <tr>{TABLE_HEADERS.map((h) => (
-                  <th key={h} className="text-left text-xs text-slate-500 px-3 py-2 bg-[#1e293b] border-b border-[#334155] whitespace-nowrap">{h}</th>
-                ))}</tr>
-              </thead>
-              <tbody>{criticosRows.map((r, i) => <TableRow key={i} r={r} />)}</tbody>
+              <SortableTableHeader cols={TABLE_COLS} sortKey={critSortKey} sortAsc={critSortAsc} onSort={handleCritSort} />
+              <tbody>{criticosSorted.map((r, i) => <TableRow key={i} r={r} />)}</tbody>
             </table>
           </div>
         </div>
@@ -219,24 +343,32 @@ export default function SemaforoAIB({
               {op}
             </button>
           ))}
-          {onRefresh && (
-            <button onClick={onRefresh}
-              className="ml-auto text-xs px-3 py-1 rounded-full border border-slate-600 text-slate-400 hover:border-sky-400 hover:text-sky-400 transition-colors">
-              ↻ Actualizar
+          <div className="ml-auto flex gap-2">
+            {tablaSortKey && (
+              <button onClick={() => { setTablaSortKey(null); setTablaSortAsc(true); }}
+                className="text-xs px-2 py-1 rounded border border-slate-600 text-slate-400 hover:border-red-400 hover:text-red-400 transition-colors">
+                ✕ orden
+              </button>
+            )}
+            <button onClick={() => downloadCSV(tablaSorted, "semaforo_tabla.csv")}
+              className="text-xs px-2 py-1 rounded border border-slate-600 text-slate-400 hover:border-sky-400 hover:text-sky-400 transition-colors">
+              ⬇ CSV
             </button>
-          )}
+            {onRefresh && (
+              <button onClick={onRefresh}
+                className="text-xs px-3 py-1 rounded-full border border-slate-600 text-slate-400 hover:border-sky-400 hover:text-sky-400 transition-colors">
+                ↻ Actualizar
+              </button>
+            )}
+          </div>
         </div>
         <div className="overflow-x-auto overflow-y-auto max-h-[480px]">
           <table className="w-full text-xs">
-            <thead className="sticky top-0 z-10">
-              <tr>{TABLE_HEADERS.map((h) => (
-                <th key={h} className="text-left text-xs text-slate-500 px-3 py-2.5 bg-[#1e293b] border-b border-[#334155] whitespace-nowrap">{h}</th>
-              ))}</tr>
-            </thead>
+            <SortableTableHeader cols={TABLE_COLS} sortKey={tablaSortKey} sortAsc={tablaSortAsc} onSort={handleTablaSort} />
             <tbody>
-              {filtered.map((r, i) => <TableRow key={i} r={r} />)}
-              {filtered.length === 0 && (
-                <tr><td colSpan={TABLE_HEADERS.length} className="px-3 py-8 text-center text-slate-500">Sin pozos en este estado.</td></tr>
+              {tablaSorted.map((r, i) => <TableRow key={i} r={r} />)}
+              {tablaSorted.length === 0 && (
+                <tr><td colSpan={TABLE_COLS.length} className="px-3 py-8 text-center text-slate-500">Sin pozos en este estado.</td></tr>
               )}
             </tbody>
           </table>

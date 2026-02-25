@@ -39,6 +39,8 @@ export default function EstadisticasPage() {
   const [loading, setLoading] = useState(true);
 
   const [sumRange, setSumRange] = useState<[number,number]>([0,10000]);
+  const [estRange, setEstRange] = useState<[number,number]>([0,200]);
+  const [balRange, setBalRange] = useState<[number,number]>([0,200]);
   const [origenSel, setOrigenSel] = useState<string[]>([]);
   const [origenOpts, setOrigenOpts] = useState<string[]>([]);
 
@@ -78,6 +80,10 @@ export default function EstadisticasPage() {
       setOrigenSel(origs);
       const sums = res.snap.map((r) => r.Sumergencia).filter((v) => v != null) as number[];
       if (sums.length) setSumRange([Math.min(...sums), Math.max(...sums)]);
+      const ests = res.snap.map((r) => r["%Estructura"]).filter((v) => v != null) as number[];
+      if (ests.length) setEstRange([Math.min(...ests), Math.max(...ests)]);
+      const bals = res.snap.map((r) => r["%Balance"]).filter((v) => v != null) as number[];
+      if (bals.length) setBalRange([Math.min(...bals), Math.max(...bals)]);
     } catch {}
     setLoading(false);
   }, []);
@@ -126,6 +132,8 @@ export default function EstadisticasPage() {
   const snapF = snap.filter((r) => {
     if (origenSel.length && !origenSel.includes(r.ORIGEN || "")) return false;
     if (r.Sumergencia != null && (r.Sumergencia < sumRange[0] || r.Sumergencia > sumRange[1])) return false;
+    if (r["%Estructura"] != null && (r["%Estructura"]! < estRange[0] || r["%Estructura"]! > estRange[1])) return false;
+    if (r["%Balance"] != null && (r["%Balance"]! < balRange[0] || r["%Balance"]! > balRange[1])) return false;
     return true;
   });
 
@@ -219,6 +227,44 @@ export default function EstadisticasPage() {
                   className="accent-sky-400 w-32 ml-2"
                 />
               </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">
+                  Rango %Estructura: {estRange[0].toFixed(1)} – {estRange[1].toFixed(1)}
+                </label>
+                <input
+                  type="range"
+                  min={0} max={estRange[1]} step={0.1}
+                  value={estRange[0]}
+                  onChange={(e) => setEstRange([+e.target.value, estRange[1]])}
+                  className="accent-sky-400 w-32"
+                />
+                <input
+                  type="range"
+                  min={estRange[0]} max={200} step={0.1}
+                  value={estRange[1]}
+                  onChange={(e) => setEstRange([estRange[0], +e.target.value])}
+                  className="accent-sky-400 w-32 ml-2"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">
+                  Rango %Balance: {balRange[0].toFixed(1)} – {balRange[1].toFixed(1)}
+                </label>
+                <input
+                  type="range"
+                  min={0} max={balRange[1]} step={0.1}
+                  value={balRange[0]}
+                  onChange={(e) => setBalRange([+e.target.value, balRange[1]])}
+                  className="accent-sky-400 w-32"
+                />
+                <input
+                  type="range"
+                  min={balRange[0]} max={200} step={0.1}
+                  value={balRange[1]}
+                  onChange={(e) => setBalRange([balRange[0], +e.target.value])}
+                  className="accent-sky-400 w-32 ml-2"
+                />
+              </div>
             </div>
           </div>
 
@@ -235,11 +281,11 @@ export default function EstadisticasPage() {
             <div className="px-4 py-3 border-b border-[#334155]">
               <h3 className="text-sm font-medium text-slate-300">📋 Pozos — última medición (filtrados)</h3>
             </div>
-            <div className="overflow-x-auto max-h-80">
-              <table className="text-xs">
+            <div className="overflow-x-auto max-h-80 overflow-y-auto">
+              <table className="w-full text-xs">
                 <thead className="sticky top-0 z-10">
                   <tr>
-                    {["NO_key","Bateria","Tipo AIB","ORIGEN","SE","DT_plot","Días","PB","Sumergencia","AIB Carrera","%Estructura","%Balance","Bba Llenado","GPM","Caudal bruto efec"].map((h) => (
+                    {["NO_key","Bateria","Tipo AIB","ORIGEN","SE","DT_plot","Días","PE","PB","NM","NC","ND","Sumergencia","Sumergencia_base","AIB Carrera","Sentido giro","Tipo Contrapesos","Distancia contrapesos (cm)","Contrapeso actual","Contrapeso ideal","AIBEB_Torque max contrapeso","Bba Diam Pistón","Bba Llenado","GPM","Caudal bruto efec","Polea Motor","Potencia Motor","RPM Motor","%Estructura","%Balance"].map((h) => (
                       <th key={h} className="bg-[#1e293b] border-b border-[#334155] px-3 py-2 whitespace-nowrap">
                         {h}
                       </th>
@@ -251,23 +297,38 @@ export default function EstadisticasPage() {
                     .sort((a, b) => (a.Dias_desde_ultima || 0) - (b.Dias_desde_ultima || 0))
                     .map((r, i) => (
                     <tr key={i}>
-                      <td className="px-3 py-1.5 font-mono text-slate-300">{r.NO_key}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r.Bateria || "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["Tipo AIB"] || "—"}</td>
+                      <td className="px-3 py-1.5 font-mono text-slate-300 whitespace-nowrap">{r.NO_key}</td>
+                      <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{r.Bateria || "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{r["Tipo AIB"] || "—"}</td>
                       <td className="px-3 py-1.5 text-slate-400">{r.ORIGEN || "—"}</td>
                       <td className="px-3 py-1.5 text-slate-400">{r.SE || "—"}</td>
                       <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{r.DT_plot?.slice(0,10) || "—"}</td>
                       <td className="px-3 py-1.5 text-slate-400">{r.Dias_desde_ultima?.toFixed(0) || "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r.PE ?? "—"}</td>
                       <td className="px-3 py-1.5 text-slate-400">{r.PB ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r.NM ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r.NC ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r.ND ?? "—"}</td>
                       <td className="px-3 py-1.5 text-sky-300 font-semibold">
                         {r.Sumergencia != null ? r.Sumergencia.toFixed(1) : "—"}
                       </td>
+                      <td className="px-3 py-1.5 text-slate-400">{r.Sumergencia_base ?? "—"}</td>
                       <td className="px-3 py-1.5 text-slate-400">{r["AIB Carrera"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["%Estructura"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["%Balance"] ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r["Sentido giro"] ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r["Tipo Contrapesos"] ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r["Distancia contrapesos (cm)"] ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r["Contrapeso actual"] ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r["Contrapeso ideal"] ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r["AIBEB_Torque max contrapeso"] ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r["Bba Diam Pistón"] ?? "—"}</td>
                       <td className="px-3 py-1.5 text-slate-400">{r["Bba Llenado"] ?? "—"}</td>
                       <td className="px-3 py-1.5 text-slate-400">{r.GPM ?? "—"}</td>
                       <td className="px-3 py-1.5 text-slate-400">{r["Caudal bruto efec"] ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r["Polea Motor"] ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r["Potencia Motor"] ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r["RPM Motor"] ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r["%Estructura"] ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{r["%Balance"] ?? "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -353,12 +414,12 @@ export default function EstadisticasPage() {
               <div className="px-4 py-2 border-b border-[#334155] text-xs text-slate-400">
                 🧰 %Estructura vs %Balance (DIN-only)
               </div>
-              <div className="p-3">
+              <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <ResponsiveContainer width="100%" height={280}>
                   <ScatterChart margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis dataKey="x" name="%Estructura" tick={{ fill: "#94a3b8", fontSize: 11 }} stroke="#64748b" />
-                    <YAxis dataKey="y" name="%Balance" tick={{ fill: "#94a3b8", fontSize: 11 }} stroke="#64748b" />
+                    <XAxis dataKey="x" name="%Estructura" tick={{ fill: "#94a3b8", fontSize: 11 }} stroke="#64748b" label={{ value: "%Estructura", position: "insideBottom", offset: -4, fill: "#64748b", fontSize: 11 }} />
+                    <YAxis dataKey="y" name="%Balance" tick={{ fill: "#94a3b8", fontSize: 11 }} stroke="#64748b" label={{ value: "%Balance", angle: -90, position: "insideLeft", fill: "#64748b", fontSize: 11 }} />
                     <Tooltip
                       cursor={{ strokeDasharray: "3 3" }}
                       contentStyle={{ background: "#1e293b", border: "1px solid #334155" }}
@@ -377,6 +438,30 @@ export default function EstadisticasPage() {
                     <Scatter data={ebData} fill="#f97316" opacity={0.7} />
                   </ScatterChart>
                 </ResponsiveContainer>
+                <div className="overflow-x-auto overflow-y-auto max-h-72">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 z-10">
+                      <tr>
+                        {["#","NO_key","ORIGEN","%Estructura","%Balance"].map((h) => (
+                          <th key={h} className="bg-[#1e293b] border-b border-[#334155] px-3 py-2 text-left whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...ebData]
+                        .sort((a, b) => (a.x ?? 0) - (b.x ?? 0))
+                        .map((r, i) => (
+                          <tr key={i} className="border-b border-[#334155]">
+                            <td className="px-3 py-1.5 text-slate-500">{i + 1}</td>
+                            <td className="px-3 py-1.5 font-mono text-slate-300 whitespace-nowrap">{r.name}</td>
+                            <td className="px-3 py-1.5 text-slate-400">DIN</td>
+                            <td className="px-3 py-1.5 text-slate-400">{r.x?.toFixed(2)}</td>
+                            <td className="px-3 py-1.5 text-slate-400">{r.y?.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

@@ -13,6 +13,6 @@ COPY . .
 
 RUN mkdir -p /app/assets
 
-EXPOSE 8080
+EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --log-level debug"]
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --log-level debug"]

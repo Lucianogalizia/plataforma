@@ -667,29 +667,6 @@ export default function EstadisticasPage() {
       <div className="border-t border-[#334155] pt-8">
         <h2 className="text-lg font-bold text-slate-100 mb-4">🚦 Semáforo AIB (SE = AIB)</h2>
 
-        {/* Umbrales */}
-        <div className="card mb-4">
-          <h3 className="text-sm font-semibold text-slate-300 mb-3">⚙️ Umbrales Semáforo AIB</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { label: "Sumergencia media (m)", val: sumMedia, set: setSumMedia },
-              { label: "Sumergencia alta (m)",  val: sumAlta,  set: setSumAlta  },
-              { label: "Llenado OK (≥ %)",      val: llenOk,   set: setLlenOk   },
-              { label: "Llenado bajo (< %)",    val: llenBajo, set: setLlenBajo  },
-            ].map(({ label, val, set }) => (
-              <div key={label}>
-                <label className="text-xs text-slate-400 block mb-1">{label}</label>
-                <input
-                  type="number"
-                  value={val}
-                  onChange={(e) => set(+e.target.value)}
-                  className="bg-[#0f172a] border border-[#334155] rounded px-3 py-1.5 text-sm text-slate-200 w-full"
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-
         {semaforoData && (
           <SemaforoAIB
             rows={semaforoData.rows}
@@ -701,6 +678,8 @@ export default function EstadisticasPage() {
               sin_datos:semaforoData.sin_datos,
             }}
             onRefresh={loadSemaforo}
+            sumMedia={sumMedia} sumAlta={sumAlta} llenOk={llenOk} llenBajo={llenBajo}
+            setSumMedia={setSumMedia} setSumAlta={setSumAlta} setLlenOk={setLlenOk} setLlenBajo={setLlenBajo}
           />
         )}
       </div>

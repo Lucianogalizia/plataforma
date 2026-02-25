@@ -2,25 +2,29 @@
 # backend/main.py
 #
 # Servidor FastAPI principal de la plataforma DINA
-#
-# (Cloud Run) IMPORTANTE:
-# - El startup NO debe hacer cargas pesadas (pandas/GCS)
-# - Si tarda mucho, Cloud Run mata la revisión por "no escucha el puerto"
 # ==========================================================
 
 from __future__ import annotations
 
 import os
 import time
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-
 import math
 import json as _json
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+from api.din import router as din_router
+from api.niv import router as niv_router
+from api.mapa import router as mapa_router
+from api.validaciones import router as validaciones_router
+from api.diagnosticos import router as diagnosticos_router
+
+# ✅ NUEVO: router health (tu archivo backend/api/health.py)
+from api.health import router as health_router
 
 
 def _clean_nans(o):
@@ -43,21 +47,13 @@ class NanSafeJSONResponse(JSONResponse):
         ).encode("utf-8")
 
 
-from api.din          import router as din_router
-from api.niv          import router as niv_router
-from api.mapa         import router as mapa_router
-from api.validaciones import router as validaciones_router
-from api.diagnosticos import router as diagnosticos_router
-from api.health       import router as health_router
-
-
 # ==========================================================
 # Configuración de entorno
 # ==========================================================
 
 CORS_ORIGINS_ENV = os.environ.get(
     "CORS_ORIGINS",
-    "http://localhost:3000,http://localhost:8501"
+    "http://localhost:3000,http://localhost:8501",
 )
 CORS_ORIGINS = [o.strip() for o in CORS_ORIGINS_ENV.split(",") if o.strip()]
 
@@ -66,12 +62,13 @@ _START_TIME = time.time()
 
 
 # ==========================================================
-# Lifespan (startup / shutdown) - LIVIANO para Cloud Run
+# Lifespan (startup / shutdown)
+#  - IMPORTANTÍSIMO para Cloud Run: NO hacer cosas pesadas acá
+#    que puedan colgar o demorar el arranque.
 # ==========================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- STARTUP (rápido) ---
     print("=" * 60)
     print("  Plataforma DINA — Backend FastAPI")
     print(f"  Versión:     {API_VERSION}")
@@ -85,10 +82,11 @@ async def lifespan(app: FastAPI):
     print(f"  CORS Origins: {CORS_ORIGINS}")
     print("=" * 60)
 
-    # ⚠️ NO cargar pandas/GCS/índices acá (Cloud Run puede matar el arranque)
+    # ✅ NO cargamos índices acá para no bloquear el arranque en Cloud Run.
+    #    Se cargarán cuando se llamen endpoints que lo necesiten (on-demand).
+
     yield
 
-    # --- SHUTDOWN ---
     uptime = round(time.time() - _START_TIME, 1)
     print(f"\n  Plataforma DINA cerrando. Uptime: {uptime}s")
 
@@ -98,18 +96,18 @@ async def lifespan(app: FastAPI):
 # ==========================================================
 
 app = FastAPI(
-    title       = "Plataforma DINA — API",
-    description = (
+    title="Plataforma DINA — API",
+    description=(
         "Backend FastAPI para la plataforma de análisis dinamométrico DINA. "
         "Gestiona cartas dinamométricas, sumergencias, diagnósticos IA "
         "y validaciones de pozos petroleros."
     ),
-    version          = API_VERSION,
-    docs_url         = "/api/docs",
-    redoc_url        = "/api/redoc",
-    openapi_url      = "/api/openapi.json",
-    lifespan         = lifespan,
-    default_response_class = NanSafeJSONResponse,
+    version=API_VERSION,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
+    lifespan=lifespan,
+    default_response_class=NanSafeJSONResponse,
 )
 
 
@@ -119,10 +117,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins     = ["*"],
-    allow_credentials = False,
-    allow_methods     = ["*"],
-    allow_headers     = ["*"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -132,9 +130,9 @@ app.add_middleware(
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
-    t0       = time.time()
+    t0 = time.time()
     response = await call_next(request)
-    elapsed  = round((time.time() - t0) * 1000, 2)
+    elapsed = round((time.time() - t0) * 1000, 2)
     response.headers["X-Process-Time"] = f"{elapsed}ms"
     return response
 
@@ -148,9 +146,9 @@ async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=500,
         content={
-            "error":   "Error interno del servidor",
+            "error": "Error interno del servidor",
             "detalle": str(exc),
-            "path":    str(request.url),
+            "path": str(request.url),
         },
     )
 
@@ -159,36 +157,36 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Routers
 # ==========================================================
 
-app.include_router(health_router)
+app.include_router(health_router)  # ✅ /api/health/...
 
 app.include_router(
     din_router,
-    prefix = "/api/din",
-    tags   = ["DIN — Cartas dinamométricas"],
+    prefix="/api/din",
+    tags=["DIN — Cartas dinamométricas"],
 )
 
 app.include_router(
     niv_router,
-    prefix = "/api/niv",
-    tags   = ["NIV — Niveles de fluido"],
+    prefix="/api/niv",
+    tags=["NIV — Niveles de fluido"],
 )
 
 app.include_router(
     mapa_router,
-    prefix = "/api/mapa",
-    tags   = ["Mapa — Sumergencia georreferenciada"],
+    prefix="/api/mapa",
+    tags=["Mapa — Sumergencia georreferenciada"],
 )
 
 app.include_router(
     validaciones_router,
-    prefix = "/api/validaciones",
-    tags   = ["Validaciones — Sistema de validación de sumergencias"],
+    prefix="/api/validaciones",
+    tags=["Validaciones — Sistema de validación de sumergencias"],
 )
 
 app.include_router(
     diagnosticos_router,
-    prefix = "/api/diagnosticos",
-    tags   = ["Diagnósticos — IA con OpenAI"],
+    prefix="/api/diagnosticos",
+    tags=["Diagnósticos — IA con OpenAI"],
 )
 
 
@@ -200,7 +198,7 @@ app.include_router(
 async def root():
     return {
         "mensaje": "Plataforma DINA — Backend API",
-        "docs":    "/api/docs",
+        "docs": "/api/docs",
         "version": API_VERSION,
     }
 
@@ -208,15 +206,15 @@ async def root():
 @app.get("/api/health", tags=["Sistema"])
 async def health_check():
     return {
-        "status":     "ok",
+        "status": "ok",
         "uptime_seg": round(time.time() - _START_TIME, 1),
-        "timestamp":  datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
 @app.get("/api/info", tags=["Sistema"])
 async def get_info():
-    # Esto puede seguir existiendo, pero que se ejecute SOLO cuando lo llamás.
+    # ⚠️ Este endpoint puede importar cosas pesadas, pero NO afecta el arranque
     from core.gcs import (
         get_gcs_client,
         load_din_index,
@@ -245,13 +243,13 @@ async def get_info():
         openai_ok = False
 
     return {
-        "version":    API_VERSION,
+        "version": API_VERSION,
         "gcs_bucket": GCS_BUCKET or "no configurado",
         "gcs_prefix": GCS_PREFIX or "(vacío)",
-        "gcs_ok":     gcs_ok,
-        "openai_ok":  openai_ok,
-        "din_count":  din_count,
-        "niv_count":  niv_count,
+        "gcs_ok": gcs_ok,
+        "openai_ok": openai_ok,
+        "din_count": din_count,
+        "niv_count": niv_count,
         "uptime_seg": round(time.time() - _START_TIME, 1),
     }
 
@@ -261,8 +259,10 @@ async def get_rutas():
     rutas = []
     for route in app.routes:
         if hasattr(route, "path") and hasattr(route, "methods"):
-            rutas.append({
-                "path":    route.path,
-                "methods": sorted(list(route.methods or [])),
-            })
+            rutas.append(
+                {
+                    "path": route.path,
+                    "methods": sorted(list(route.methods or [])),
+                }
+            )
     return {"rutas": sorted(rutas, key=lambda r: r["path"])}

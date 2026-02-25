@@ -1,22 +1,26 @@
-from pydantic_settings import BaseSettings
-from functools import lru_cache
+import os
 
 
-class Settings(BaseSettings):
-    PROJECT_NAME: str = "Plataforma"
-    VERSION: str = "1.0.0"
+class Settings:
+    """
+    Configuración global del backend.
+    Lee variables de entorno (Cloud Run) con valores por defecto.
+    """
 
-    # Variables opcionales de entorno (Cloud Run)
-    GOOGLE_CLOUD_PROJECT: str | None = None
-    GCS_BUCKET: str | None = None
+    # Info básica
+    PROJECT_NAME: str = os.getenv("PROJECT_NAME", "DINA Backend")
+    VERSION: str = os.getenv("VERSION", "1.0.0")
 
-    class Config:
-        env_file = ".env"
+    # Google Cloud
+    GOOGLE_CLOUD_PROJECT: str | None = os.getenv("GOOGLE_CLOUD_PROJECT")
+    GCS_BUCKET: str | None = os.getenv("GCS_BUCKET")
+
+    # Puerto (Cloud Run usa PORT=8000)
+    PORT: int = int(os.getenv("PORT", 8000))
+
+    # Entorno
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "production")
 
 
-@lru_cache
-def get_settings():
-    return Settings()
-
-
-settings = get_settings()
+# Instancia global que importa main.py
+settings = Settings()

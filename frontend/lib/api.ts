@@ -109,11 +109,20 @@ export interface SnapRow {
   Sumergencia_base?: string;
   "AIB Carrera"?: number | null;
   "Sentido giro"?: string;
-  "%Estructura"?: number | null;
-  "%Balance"?: number | null;
+  "Tipo Contrapesos"?: string;
+  "Distancia contrapesos (cm)"?: number | null;
+  "Contrapeso actual"?: number | null;
+  "Contrapeso ideal"?: number | null;
+  "AIBEB_Torque max contrapeso"?: number | null;
+  "Bba Diam Pistón"?: number | null;
   "Bba Llenado"?: number | null;
   "Caudal bruto efec"?: number | null;
+  "Polea Motor"?: number | null;
+  "Potencia Motor"?: number | null;
+  "RPM Motor"?: number | null;
   GPM?: number | null;
+  "%Estructura"?: number | null;
+  "%Balance"?: number | null;
   [key: string]: unknown;
 }
 

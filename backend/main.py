@@ -52,7 +52,7 @@ from api.mapa         import router as mapa_router
 from api.validaciones import router as validaciones_router
 from api.diagnosticos import router as diagnosticos_router
 from api.health_build import router as health_build_router  # ✅ NUEVO
-
+from api.health import router as health_router
 
 # ==========================================================
 # Configuración de entorno

@@ -2,6 +2,10 @@
 # backend/main.py
 #
 # Servidor FastAPI principal de la plataforma DINA
+#
+# (Cloud Run) IMPORTANTE:
+# - El startup NO debe hacer cargas pesadas (pandas/GCS)
+# - Si tarda mucho, Cloud Run mata la revisión por "no escucha el puerto"
 # ==========================================================
 
 from __future__ import annotations
@@ -39,16 +43,12 @@ class NanSafeJSONResponse(JSONResponse):
         ).encode("utf-8")
 
 
-# ==========================
-# Routers
-# ==========================
-
 from api.din          import router as din_router
 from api.niv          import router as niv_router
 from api.mapa         import router as mapa_router
 from api.validaciones import router as validaciones_router
 from api.diagnosticos import router as diagnosticos_router
-from api.health       import router as health_router   # ✅ NUEVO
+from api.health       import router as health_router
 
 
 # ==========================================================
@@ -66,11 +66,12 @@ _START_TIME = time.time()
 
 
 # ==========================================================
-# Lifespan
+# Lifespan (startup / shutdown) - LIVIANO para Cloud Run
 # ==========================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # --- STARTUP (rápido) ---
     print("=" * 60)
     print("  Plataforma DINA — Backend FastAPI")
     print(f"  Versión:     {API_VERSION}")
@@ -81,28 +82,13 @@ async def lifespan(app: FastAPI):
     prefix = os.environ.get("DINAS_GCS_PREFIX", "")
     print(f"  GCS Bucket:  {bucket or '⚠️  NO CONFIGURADO'}")
     print(f"  GCS Prefix:  {prefix or '(vacío)'}")
-
-    try:
-        from core.gcs import get_gcs_client
-        client = get_gcs_client()
-        print(f"  GCS Client:  {'✅ Conectado' if client else '⚠️  No disponible (modo local)'}")
-    except Exception as e:
-        print(f"  GCS Client:  ❌ Error: {e}")
-
-    try:
-        from core.gcs import load_din_index, load_niv_index
-        df_din = load_din_index()
-        df_niv = load_niv_index()
-        print(f"  DIN Index:   ✅ {len(df_din)} registros")
-        print(f"  NIV Index:   ✅ {len(df_niv)} registros")
-    except Exception as e:
-        print(f"  Índices:     ❌ Error al cargar: {e}")
-
     print(f"  CORS Origins: {CORS_ORIGINS}")
     print("=" * 60)
 
+    # ⚠️ NO cargar pandas/GCS/índices acá (Cloud Run puede matar el arranque)
     yield
 
+    # --- SHUTDOWN ---
     uptime = round(time.time() - _START_TIME, 1)
     print(f"\n  Plataforma DINA cerrando. Uptime: {uptime}s")
 
@@ -112,14 +98,18 @@ async def lifespan(app: FastAPI):
 # ==========================================================
 
 app = FastAPI(
-    title="Plataforma DINA — API",
-    description="Backend FastAPI para la plataforma DINA.",
-    version=API_VERSION,
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
-    lifespan=lifespan,
-    default_response_class=NanSafeJSONResponse,
+    title       = "Plataforma DINA — API",
+    description = (
+        "Backend FastAPI para la plataforma de análisis dinamométrico DINA. "
+        "Gestiona cartas dinamométricas, sumergencias, diagnósticos IA "
+        "y validaciones de pozos petroleros."
+    ),
+    version          = API_VERSION,
+    docs_url         = "/api/docs",
+    redoc_url        = "/api/redoc",
+    openapi_url      = "/api/openapi.json",
+    lifespan         = lifespan,
+    default_response_class = NanSafeJSONResponse,
 )
 
 
@@ -129,28 +119,28 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins     = ["*"],
+    allow_credentials = False,
+    allow_methods     = ["*"],
+    allow_headers     = ["*"],
 )
 
 
 # ==========================================================
-# Middleware timing
+# Middleware de timing
 # ==========================================================
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
-    t0 = time.time()
+    t0       = time.time()
     response = await call_next(request)
-    elapsed = round((time.time() - t0) * 1000, 2)
+    elapsed  = round((time.time() - t0) * 1000, 2)
     response.headers["X-Process-Time"] = f"{elapsed}ms"
     return response
 
 
 # ==========================================================
-# Exception handler
+# Manejo global de excepciones
 # ==========================================================
 
 @app.exception_handler(Exception)
@@ -158,59 +148,59 @@ async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=500,
         content={
-            "error": "Error interno del servidor",
+            "error":   "Error interno del servidor",
             "detalle": str(exc),
-            "path": str(request.url),
+            "path":    str(request.url),
         },
     )
 
 
 # ==========================================================
-# Registro de routers
+# Routers
 # ==========================================================
 
-app.include_router(health_router)  # ✅ NUEVO
+app.include_router(health_router)
 
 app.include_router(
     din_router,
-    prefix="/api/din",
-    tags=["DIN — Cartas dinamométricas"],
+    prefix = "/api/din",
+    tags   = ["DIN — Cartas dinamométricas"],
 )
 
 app.include_router(
     niv_router,
-    prefix="/api/niv",
-    tags=["NIV — Niveles de fluido"],
+    prefix = "/api/niv",
+    tags   = ["NIV — Niveles de fluido"],
 )
 
 app.include_router(
     mapa_router,
-    prefix="/api/mapa",
-    tags=["Mapa — Sumergencia georreferenciada"],
+    prefix = "/api/mapa",
+    tags   = ["Mapa — Sumergencia georreferenciada"],
 )
 
 app.include_router(
     validaciones_router,
-    prefix="/api/validaciones",
-    tags=["Validaciones"],
+    prefix = "/api/validaciones",
+    tags   = ["Validaciones — Sistema de validación de sumergencias"],
 )
 
 app.include_router(
     diagnosticos_router,
-    prefix="/api/diagnosticos",
-    tags=["Diagnósticos — IA"],
+    prefix = "/api/diagnosticos",
+    tags   = ["Diagnósticos — IA con OpenAI"],
 )
 
 
 # ==========================================================
-# Endpoints base
+# Endpoints raíz
 # ==========================================================
 
 @app.get("/", include_in_schema=False)
 async def root():
     return {
         "mensaje": "Plataforma DINA — Backend API",
-        "docs": "/api/docs",
+        "docs":    "/api/docs",
         "version": API_VERSION,
     }
 
@@ -218,7 +208,61 @@ async def root():
 @app.get("/api/health", tags=["Sistema"])
 async def health_check():
     return {
-        "status": "ok",
+        "status":     "ok",
         "uptime_seg": round(time.time() - _START_TIME, 1),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp":  datetime.now(timezone.utc).isoformat(),
     }
+
+
+@app.get("/api/info", tags=["Sistema"])
+async def get_info():
+    # Esto puede seguir existiendo, pero que se ejecute SOLO cuando lo llamás.
+    from core.gcs import (
+        get_gcs_client,
+        load_din_index,
+        load_niv_index,
+        GCS_BUCKET,
+        GCS_PREFIX,
+    )
+    from ia.diagnostico import get_openai_key
+
+    try:
+        client = get_gcs_client()
+        gcs_ok = client is not None
+    except Exception:
+        gcs_ok = False
+
+    try:
+        din_count = len(load_din_index())
+        niv_count = len(load_niv_index())
+    except Exception:
+        din_count = -1
+        niv_count = -1
+
+    try:
+        openai_ok = bool(get_openai_key())
+    except Exception:
+        openai_ok = False
+
+    return {
+        "version":    API_VERSION,
+        "gcs_bucket": GCS_BUCKET or "no configurado",
+        "gcs_prefix": GCS_PREFIX or "(vacío)",
+        "gcs_ok":     gcs_ok,
+        "openai_ok":  openai_ok,
+        "din_count":  din_count,
+        "niv_count":  niv_count,
+        "uptime_seg": round(time.time() - _START_TIME, 1),
+    }
+
+
+@app.get("/api/rutas", tags=["Sistema"])
+async def get_rutas():
+    rutas = []
+    for route in app.routes:
+        if hasattr(route, "path") and hasattr(route, "methods"):
+            rutas.append({
+                "path":    route.path,
+                "methods": sorted(list(route.methods or [])),
+            })
+    return {"rutas": sorted(rutas, key=lambda r: r["path"])}

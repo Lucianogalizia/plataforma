@@ -27,18 +27,7 @@ interface RowState {
   fecha_key: string;
 }
 
-function pozosToRows(pozos: PuntoMapa[]): RowState[] {
-  return pozos.map((p) => ({
-    ...p,
-    valida: true,
-    comentario: "",
-    usuario: "",
-    fecha_key: p.DT_plot_str || "",
-  }));
-}
-
-const HEADERS: { key: keyof RowState | "_valida" | "_comentario"; label: string }[] = [
-  { key: "_valida",           label: "✅ Válida" },
+const SORT_COLS: { key: keyof RowState; label: string }[] = [
   { key: "NO_key",            label: "Pozo" },
   { key: "nivel_5",           label: "Batería" },
   { key: "ORIGEN",            label: "Origen" },
@@ -49,8 +38,17 @@ const HEADERS: { key: keyof RowState | "_valida" | "_comentario"; label: string 
   { key: "NM",                label: "NM" },
   { key: "NC",                label: "NC" },
   { key: "ND",                label: "ND" },
-  { key: "_comentario",       label: "Comentario" },
 ];
+
+function pozosToRows(pozos: PuntoMapa[]): RowState[] {
+  return pozos.map((p) => ({
+    ...p,
+    valida: true,
+    comentario: "",
+    usuario: "",
+    fecha_key: p.DT_plot_str || "",
+  }));
+}
 
 export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
   const [rows, setRows]     = useState<RowState[]>(() => pozosToRows(pozos));
@@ -59,7 +57,7 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
   const [usuario, setUsuario] = useState("");
   const [editIdx, setEditIdx] = useState<number | null>(null);
   const [editComentario, setEditComentario] = useState("");
-  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<keyof RowState | null>(null);
   const [sortAsc, setSortAsc] = useState(true);
 
   useEffect(() => {
@@ -68,10 +66,10 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
   }, [pozos]);
 
   const sorted = useMemo(() => {
-    if (!sortKey || sortKey === "_valida" || sortKey === "_comentario") return rows;
+    if (!sortKey) return rows;
     return [...rows].sort((a, b) => {
-      const av = (a as any)[sortKey];
-      const bv = (b as any)[sortKey];
+      const av = a[sortKey];
+      const bv = b[sortKey];
       if (av == null && bv == null) return 0;
       if (av == null) return 1;
       if (bv == null) return -1;
@@ -80,42 +78,41 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
     });
   }, [rows, sortKey, sortAsc]);
 
-  function handleSort(key: string) {
-    if (key === "_valida" || key === "_comentario") return;
+  function handleSort(key: keyof RowState) {
     if (sortKey === key) setSortAsc((a) => !a);
     else { setSortKey(key); setSortAsc(true); }
   }
 
-  const handleCheckbox = async (idx: number, valida: boolean) => {
-    const r = sorted[idx];
+  const handleCheckbox = async (sortedIdx: number, valida: boolean) => {
+    const r = sorted[sortedIdx];
     const realIdx = rows.indexOf(r);
     setRows((prev) => { const n = [...prev]; n[realIdx] = { ...n[realIdx], valida }; return n; });
-    setSaving((p) => ({ ...p, [idx]: true }));
+    setSaving((p) => ({ ...p, [sortedIdx]: true }));
     try {
       await api.saveValidacion(r.NO_key, {
         fecha_key: r.fecha_key, validada: valida,
         comentario: r.comentario, usuario: usuario || "anónimo",
       });
-      setSaved((p) => ({ ...p, [idx]: true }));
-      setTimeout(() => setSaved((p) => ({ ...p, [idx]: false })), 2000);
+      setSaved((p) => ({ ...p, [sortedIdx]: true }));
+      setTimeout(() => setSaved((p) => ({ ...p, [sortedIdx]: false })), 2000);
     } catch {}
-    setSaving((p) => ({ ...p, [idx]: false }));
+    setSaving((p) => ({ ...p, [sortedIdx]: false }));
   };
 
-  const handleGuardarComentario = async (idx: number) => {
-    const r = sorted[idx];
+  const handleGuardarComentario = async (sortedIdx: number) => {
+    const r = sorted[sortedIdx];
     const realIdx = rows.indexOf(r);
-    setSaving((p) => ({ ...p, [idx]: true }));
+    setSaving((p) => ({ ...p, [sortedIdx]: true }));
     try {
       await api.saveValidacion(r.NO_key, {
         fecha_key: r.fecha_key, validada: r.valida,
         comentario: editComentario, usuario: usuario || "anónimo",
       });
       setRows((prev) => { const n = [...prev]; n[realIdx] = { ...n[realIdx], comentario: editComentario }; return n; });
-      setSaved((p) => ({ ...p, [idx]: true }));
-      setTimeout(() => setSaved((p) => ({ ...p, [idx]: false })), 2000);
+      setSaved((p) => ({ ...p, [sortedIdx]: true }));
+      setTimeout(() => setSaved((p) => ({ ...p, [sortedIdx]: false })), 2000);
     } catch {}
-    setSaving((p) => ({ ...p, [idx]: false }));
+    setSaving((p) => ({ ...p, [sortedIdx]: false }));
     setEditIdx(null);
   };
 
@@ -137,7 +134,7 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
           className="bg-[#0f172a] border border-[#334155] rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-600 w-40" />
         {sortKey && (
           <button onClick={() => { setSortKey(null); setSortAsc(true); }}
-            className="text-xs px-2 py-1 rounded border border-slate-600 text-slate-400 hover:border-red-400 hover:text-red-400 transition-colors ml-2">
+            className="text-xs px-2 py-1 rounded border border-slate-600 text-slate-400 hover:border-red-400 hover:text-red-400 transition-colors">
             ✕ orden
           </button>
         )}
@@ -149,15 +146,20 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
           <table className="w-full text-sm">
             <thead className="sticky top-0 z-10">
               <tr>
-                {HEADERS.map((h) => (
-                  <th key={h.key}
-                    onClick={() => handleSort(h.key)}
-                    className={`text-left text-xs text-slate-500 px-3 py-2.5 bg-[#1e293b] border-b border-[#334155] whitespace-nowrap select-none
-                      ${h.key !== "_valida" && h.key !== "_comentario" ? "cursor-pointer hover:text-sky-400 transition-colors" : ""}`}>
-                    {h.label}
-                    {sortKey === h.key ? (sortAsc ? " ▲" : " ▼") : (h.key !== "_valida" && h.key !== "_comentario" ? " ↕" : "")}
+                {/* Válida — no sorteable */}
+                <th className="text-left text-xs text-slate-500 px-3 py-2.5 bg-[#1e293b] border-b border-[#334155] whitespace-nowrap">
+                  ✅ Válida
+                </th>
+                {SORT_COLS.map((c) => (
+                  <th key={c.key} onClick={() => handleSort(c.key)}
+                    className="text-left text-xs text-slate-500 px-3 py-2.5 bg-[#1e293b] border-b border-[#334155] whitespace-nowrap cursor-pointer select-none hover:text-sky-400 transition-colors">
+                    {c.label}{sortKey === c.key ? (sortAsc ? " ▲" : " ▼") : " ↕"}
                   </th>
                 ))}
+                {/* Comentario — no sorteable */}
+                <th className="text-left text-xs text-slate-500 px-3 py-2.5 bg-[#1e293b] border-b border-[#334155] whitespace-nowrap">
+                  Comentario
+                </th>
               </tr>
             </thead>
             <tbody>

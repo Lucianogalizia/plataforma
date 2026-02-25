@@ -72,7 +72,7 @@ export default function MedicionesPage() {
   }));
 
   return (
-    <div style={{ width: "100%", minWidth: 0, overflow: "hidden" }} className="space-y-6">
+    <div className="space-y-6">
       <div>
         <h2 className="text-xl font-bold text-slate-100">
           📈 Mediciones — Pozo: {pozo || "…"}
@@ -86,7 +86,7 @@ export default function MedicionesPage() {
       {!loading && (
         <>
           {/* KPIs */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3" style={{ minWidth: 0 }}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <KPICard title="Mediciones totales" value={total} color="sky" />
             <KPICard title="Datos DIN" value={mediciones.filter((m) => m.ORIGEN === "DIN").length} />
             <KPICard title="Datos NIV" value={mediciones.filter((m) => m.ORIGEN === "NIV").length} />
@@ -101,12 +101,12 @@ export default function MedicionesPage() {
               </h3>
               <span className="text-xs text-slate-500">{total} registros</span>
             </div>
-            <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: "20rem" }}>
-              <table style={{ minWidth: "max-content", width: "100%" }} className="text-xs">
+            <div className="overflow-x-auto max-h-80 overflow-y-auto">
+              <table className="w-full text-xs">
                 <thead className="sticky top-0 z-10">
                   <tr>
                     {cols.map((c) => (
-                      <th key={c} className="bg-[#1e293b] border-b border-[#334155] px-3 py-2 whitespace-nowrap">
+                      <th key={c} className="bg-[#1e293b] border-b border-[#334155] px-3 py-2">
                         {c}
                       </th>
                     ))}
@@ -118,7 +118,7 @@ export default function MedicionesPage() {
                       {cols.map((c) => {
                         const v = m[c];
                         return (
-                          <td key={c} className="px-3 py-1.5 text-slate-300 whitespace-nowrap">
+                          <td key={c} className="px-3 py-1.5 text-slate-300">
                             {v == null ? "—" : typeof v === "number" ? v.toFixed(2) : String(v)}
                           </td>
                         );

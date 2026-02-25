@@ -116,12 +116,16 @@ export default function EstadisticasPage() {
 
   const loadSemaforo = useCallback(async (sm = sumMedia, sa = sumAlta, lo = llenOk, lb = llenBajo) => {
     try {
+      console.log("[semaforo] llamando API...", { sm, sa, lo, lb });
       const res = await api.getSemaforoAib({
         sum_media: sm, sum_alta: sa,
         llen_ok: lo, llen_bajo: lb, solo_se_aib: true
       });
+      console.log("[semaforo] respuesta:", res);
       setSemaforoData(res);
-    } catch {}
+    } catch (err) {
+      console.error("[semaforo] ERROR:", err);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

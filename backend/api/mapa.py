@@ -201,8 +201,9 @@ def _apply_filtros(
 def _to_json_safe(df: pd.DataFrame) -> list[dict]:
     """
     Convierte un DataFrame a lista de dicts JSON-safe.
-    Timestamps → ISO string, NaN/NaT → None.
+    Timestamps → ISO string, NaN/NaT/Inf → None.
     """
+    import math
     df = df.copy()
 
     for col in df.select_dtypes(
@@ -212,8 +213,19 @@ def _to_json_safe(df: pd.DataFrame) -> list[dict]:
             df[col].notna(), None
         )
 
-    df = df.where(pd.notnull(df), None)
-    return df.to_dict(orient="records")
+    records = df.to_dict(orient="records")
+    clean = []
+    for row in records:
+        clean_row = {}
+        for k, v in row.items():
+            if v is None:
+                clean_row[k] = None
+            elif isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                clean_row[k] = None
+            else:
+                clean_row[k] = v
+        clean.append(clean_row)
+    return clean
 
 
 # ==========================================================
@@ -360,11 +372,10 @@ async def get_puntos_mapa(
     ]
 
     snap_out = snap[keep].copy()
-    snap_out = snap_out.where(pd.notnull(snap_out), None)
 
     return {
         "total":  len(snap_out),
-        "puntos": snap_out.to_dict(orient="records"),
+        "puntos": _to_json_safe(snap_out),
     }
 
 
@@ -431,29 +442,30 @@ async def get_semaforo_aib_mapa(
 
     counts = get_semaforo_counts(snap)
 
+    # DT_plot como string para JSON
     snap["DT_plot_str"] = pd.to_datetime(
         snap["DT_plot"], errors="coerce"
     ).dt.strftime("%Y-%m-%d %H:%M")
 
     keep = [
         c for c in [
-            "NO_key", "nivel_5", "lat", "lon",
-            "Sumergencia", "Bba Llenado", "SE",
+            "NO_key", "nivel_5", "ORIGEN",
+            "Sumergencia", "Sumergencia_base", "SE",
             "Semaforo_AIB", "DT_plot_str", "Dias_desde_ultima",
+            "PB", "PE", "NM", "NC", "ND",
+            "Bba Llenado", "%Estructura", "%Balance",
+            "GPM", "Caudal bruto efec",
         ]
         if c in snap.columns
     ]
 
     snap_out = snap[keep].copy()
 
-    import math, numpy as np
-    # Reemplazar NaN/Inf con None de forma robusta antes de serializar
-    for col in snap_out.columns:
-        snap_out[col] = snap_out[col].apply(
-            lambda v: None if (v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v)))) else v
-        )
+    puntos = _to_json_safe(snap_out)
 
-    puntos = snap_out.to_dict(orient="records")
+    # Renombrar DT_plot_str -> DT_plot para el frontend
+    for p in puntos:
+        p["DT_plot"] = p.pop("DT_plot_str", None)
 
     return {
         "total":  len(puntos),

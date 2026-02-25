@@ -348,7 +348,7 @@ def build_last_snapshot_for_map(
         keep = [
             c for c in [
                 "NO_key", "mtime", "din_datetime", "niv_datetime",
-                "FE_key", "HO_key", "PB", "NM", "NC", "ND", "PE",
+                "FE_key", "HO_key", "PB", "NM", "NC", "ND", "PE", "SE",
             ]
             if c in df.columns
         ]
@@ -366,10 +366,14 @@ def build_last_snapshot_for_map(
                 d[c] = None
             d[c] = pd.to_numeric(d[c], errors="coerce")
 
+        # SE como string
+        if "SE" not in d.columns:
+            d["SE"] = None
+
         d    = d.sort_values(["NO_key", "DT_plot"], na_position="last")
         last = d.groupby("NO_key", as_index=False).tail(1).copy()
 
-        out_cols = ["NO_key", "ORIGEN", "DT_plot", "PB", "NM", "NC", "ND", "PE"]
+        out_cols = ["NO_key", "ORIGEN", "DT_plot", "PB", "NM", "NC", "ND", "PE", "SE"]
         return last[out_cols]
 
     din_last = _prep_one(din_ok, "DIN", ["din_datetime", "mtime"])

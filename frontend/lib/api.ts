@@ -365,7 +365,7 @@ export const api = {
   getBaterias: () =>
     apiFetch<{ baterias: string[] }>("/api/mapa/baterias"),
 
-  getSemaforoAib: (params?: {
+  getSemaforoAib: async (params?: {
     sum_media?: number;
     sum_alta?: number;
     llen_ok?: number;
@@ -378,9 +378,19 @@ export const api = {
     if (params?.llen_ok != null)    qs.set("llen_ok",    String(params.llen_ok));
     if (params?.llen_bajo != null)  qs.set("llen_bajo",  String(params.llen_bajo));
     if (params?.solo_se_aib != null) qs.set("solo_se_aib", String(params.solo_se_aib));
-    return apiFetch<{ total: number; criticos: number; alertas: number; normales: number; sin_datos: number; rows: SemaforoRow[] }>(
-      `/api/mapa/semaforo-aib?${qs}`
-    );
+    const raw = await apiFetch<{
+      total: number;
+      counts: { total_aib?: number; normal?: number; alerta?: number; critico?: number; sin_datos?: number };
+      puntos: SemaforoRow[];
+    }>(`/api/mapa/semaforo-aib?${qs}`);
+    return {
+      total:     raw.total,
+      normales:  raw.counts?.normal   ?? 0,
+      alertas:   raw.counts?.alerta   ?? 0,
+      criticos:  raw.counts?.critico  ?? 0,
+      sin_datos: raw.counts?.sin_datos ?? 0,
+      rows:      raw.puntos ?? [],
+    };
   },
 
   // ==========================================================

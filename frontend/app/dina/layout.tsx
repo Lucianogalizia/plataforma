@@ -38,7 +38,7 @@ export default function DinaLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="flex min-h-screen">
       <Sidebar />
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Header con selector de pozo */}
         <div className="border-b border-[#334155] bg-[#1e293b]/50 px-6 py-3 flex items-center gap-4 flex-wrap">
           <span className="text-sm text-slate-400 whitespace-nowrap">Pozo (NO=):</span>
@@ -74,7 +74,7 @@ export default function DinaLayout({ children }: { children: React.ReactNode }) 
         </div>
 
         {/* Contenido */}
-        <main className="flex-1 p-6 overflow-auto">
+        <main className="flex-1 p-6 overflow-auto min-w-0">
           {children}
         </main>
       </div>

@@ -258,4 +258,8 @@ def load_coords_repo(base_dir: Path | None = None) -> "pd.DataFrame":
 
         return pd.DataFrame()
 
+    
     return ttl_get("repo:coords_excel", _loader, ttl_s=3600)  # 1 hora
+
+def is_gs_path(path: str) -> bool:
+    return isinstance(path, str) and path.startswith("gs://")

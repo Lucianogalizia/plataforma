@@ -42,13 +42,13 @@ tr:hover td { background: rgba(56,189,248,0.05); }
 }
 .pulse-dot { animation: pulse-dot 2s infinite; }
 
-/* ✅ Evitar scroll horizontal en toda la app (sin recortar el contenido) */
+/* Evitar scroll horizontal en toda la app */
 html, body {
   max-width: 100%;
   overflow-x: hidden;
 }
 
-/* ✅ Asegurar que Plotly no “rompa” el ancho */
+/* Asegurar que Plotly no "rompa" el ancho */
 .js-plotly-plot, .plot-container, .svg-container {
   width: 100% !important;
   max-width: 100% !important;

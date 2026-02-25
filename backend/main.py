@@ -45,11 +45,13 @@ class NanSafeJSONResponse(JSONResponse):
             allow_nan=False,
         ).encode("utf-8")
 
+
 from api.din          import router as din_router
 from api.niv          import router as niv_router
 from api.mapa         import router as mapa_router
 from api.validaciones import router as validaciones_router
 from api.diagnosticos import router as diagnosticos_router
+from api.health_build import router as health_build_router  # ✅ NUEVO
 
 
 # ==========================================================
@@ -182,6 +184,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 # ==========================================================
 # Routers
 # ==========================================================
+
+app.include_router(health_build_router)  # ✅ NUEVO
 
 app.include_router(
     din_router,

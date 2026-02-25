@@ -4,19 +4,10 @@ import { useEffect, useState, useCallback } from "react";
 import api, { SnapRow, SnapKpis, TendenciaPozo, PozosMes, Cobertura } from "@/lib/api";
 import KPICard from "@/components/KPICard";
 import SemaforoAIB from "@/components/SemaforoAIB";
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  ScatterChart, Scatter, Legend,
-} from "recharts";
+import SortableTable from "@/components/SortableTable";
+import PlotlyChart from "@/components/PlotlyChart";
 
 const TREND_VARS = ["Sumergencia","PB","NM","NC","ND","%Estructura","%Balance","GPM","Caudal bruto efec"];
-
-const SEV_COLORS: Record<string,string> = {
-  "🟢 NORMAL":  "#22c55e",
-  "🟡 ALERTA":  "#eab308",
-  "🔴 CRÍTICO": "#ef4444",
-  "SIN DATOS":  "#64748b",
-};
 
 function histo(data: (number|null|undefined)[], bins = 20) {
   const vals = data.filter((v) => v != null) as number[];
@@ -44,25 +35,21 @@ export default function EstadisticasPage() {
   const [origenSel, setOrigenSel] = useState<string[]>([]);
   const [origenOpts, setOrigenOpts] = useState<string[]>([]);
 
-  // Tendencias
   const [trendVar, setTrendVar] = useState("Sumergencia");
   const [minPts, setMinPts] = useState(4);
   const [soloPos, setSoloPos] = useState(true);
   const [tendencias, setTendencias] = useState<TendenciaPozo[]>([]);
   const [loadingTend, setLoadingTend] = useState(false);
 
-  // Pozos por mes
   const [ppm, setPpm] = useState<PozosMes[]>([]);
   const [ultimoMes, setUltimoMes] = useState("");
   const [ultimoVal, setUltimoVal] = useState(0);
 
-  // Cobertura
   const [cobFrom, setCobFrom] = useState("");
   const [cobTo, setCobTo] = useState("");
   const [cobModo, setCobModo] = useState("historico");
   const [cobertura, setCobertura] = useState<Cobertura|null>(null);
 
-  // Semáforo AIB params
   const [semaforoData, setSemaforoData] = useState<any>(null);
   const [sumMedia, setSumMedia] = useState(200);
   const [sumAlta, setSumAlta]  = useState(250);
@@ -116,16 +103,9 @@ export default function EstadisticasPage() {
 
   const loadSemaforo = useCallback(async (sm = sumMedia, sa = sumAlta, lo = llenOk, lb = llenBajo) => {
     try {
-      console.log("[semaforo] llamando API...", { sm, sa, lo, lb });
-      const res = await api.getSemaforoAib({
-        sum_media: sm, sum_alta: sa,
-        llen_ok: lo, llen_bajo: lb, solo_se_aib: true
-      });
-      console.log("[semaforo] respuesta:", res);
+      const res = await api.getSemaforoAib({ sum_media: sm, sum_alta: sa, llen_ok: lo, llen_bajo: lb, solo_se_aib: true });
       setSemaforoData(res);
-    } catch (err) {
-      console.error("[semaforo] ERROR:", err);
-    }
+    } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -133,7 +113,6 @@ export default function EstadisticasPage() {
   useEffect(() => { loadTend(); }, [loadTend]);
   useEffect(() => { loadSemaforo(); }, [loadSemaforo]);
 
-  // Filtrar snap
   const snapF = snap.filter((r) => {
     if (origenSel.length && !origenSel.includes(r.ORIGEN || "")) return false;
     if (r.Sumergencia != null && (r.Sumergencia < sumRange[0] || r.Sumergencia > sumRange[1])) return false;
@@ -146,35 +125,70 @@ export default function EstadisticasPage() {
   const histPB   = histo(snapF.map((r) => r.PB));
   const histDias = histo(snapF.map((r) => r.Dias_desde_ultima));
 
-  const origenCount = origenSel.length
-    ? Object.entries(
-        snapF.reduce((acc, r) => {
-          const o = r.ORIGEN || "?";
-          acc[o] = (acc[o] || 0) + 1;
-          return acc;
-        }, {} as Record<string,number>)
-      ).map(([o, c]) => ({ ORIGEN: o, Pozos: c }))
-    : [];
+  const origenCount = Object.entries(
+    snapF.reduce((acc, r) => { const o = r.ORIGEN || "?"; acc[o] = (acc[o]||0)+1; return acc; }, {} as Record<string,number>)
+  ).map(([o,c]) => ({ ORIGEN: o, Pozos: c }));
 
   const ebData = snapF
     .filter((r) => r["%Estructura"] != null && r["%Balance"] != null)
     .map((r) => ({ x: r["%Estructura"]!, y: r["%Balance"]!, name: r.NO_key }));
 
-  // Calidad del dato
-  const badSum  = snapF.filter((r) => r.Sumergencia != null && r.Sumergencia < 0);
-  const pbVals  = snapF.map((r) => r.PB).filter((v) => v != null) as number[];
-  const q1pb    = pbVals.sort((a,b)=>a-b)[Math.floor(pbVals.length*0.25)] ?? 0;
-  const q3pb    = pbVals[Math.floor(pbVals.length*0.75)] ?? 0;
-  const iqr     = q3pb - q1pb;
-  const badPB   = snapF.filter((r) => r.PB != null && (r.PB! < q1pb - 1.5*iqr || r.PB! > q3pb + 1.5*iqr));
+  const badSum = snapF.filter((r) => r.Sumergencia != null && r.Sumergencia < 0);
+  const pbVals = snapF.map((r) => r.PB).filter((v) => v != null) as number[];
+  const q1pb   = pbVals.sort((a,b)=>a-b)[Math.floor(pbVals.length*0.25)] ?? 0;
+  const q3pb   = pbVals[Math.floor(pbVals.length*0.75)] ?? 0;
+  const iqr    = q3pb - q1pb;
+  const badPB  = snapF.filter((r) => r.PB != null && (r.PB! < q1pb - 1.5*iqr || r.PB! > q3pb + 1.5*iqr));
 
-  const topTend = tendencias.slice(0, 30).sort((a,b) => a.pendiente_por_mes - b.pendiente_por_mes);
+  const snapCols = [
+    { key: "NO_key",                      label: "NO_key" },
+    { key: "Bateria",                     label: "Bateria" },
+    { key: "Tipo AIB",                    label: "Tipo AIB" },
+    { key: "ORIGEN",                      label: "ORIGEN" },
+    { key: "SE",                          label: "SE" },
+    { key: "DT_plot",                     label: "DT_plot", render: (v: string) => v?.slice(0,10) || "—" },
+    { key: "Dias_desde_ultima",           label: "Días",    render: (v: number) => v?.toFixed(0) || "—" },
+    { key: "PE",                          label: "PE" },
+    { key: "PB",                          label: "PB" },
+    { key: "NM",                          label: "NM" },
+    { key: "NC",                          label: "NC" },
+    { key: "ND",                          label: "ND" },
+    { key: "Sumergencia",                 label: "Sumergencia", render: (v: number) => v != null ? <span className="text-sky-300 font-semibold">{v.toFixed(1)}</span> : "—" },
+    { key: "Sumergencia_base",            label: "Sumer. base" },
+    { key: "AIB Carrera",                 label: "AIB Carrera" },
+    { key: "Sentido giro",                label: "Sentido giro" },
+    { key: "Tipo Contrapesos",            label: "Tipo Contrapesos" },
+    { key: "Distancia contrapesos (cm)",  label: "Dist. contrapesos" },
+    { key: "Contrapeso actual",           label: "Contrapeso actual" },
+    { key: "Contrapeso ideal",            label: "Contrapeso ideal" },
+    { key: "AIBEB_Torque max contrapeso", label: "Torque max" },
+    { key: "Bba Diam Pistón",             label: "Bba Diam Pistón" },
+    { key: "Bba Llenado",                 label: "Bba Llenado" },
+    { key: "GPM",                         label: "GPM" },
+    { key: "Caudal bruto efec",           label: "Caudal bruto efec" },
+    { key: "Polea Motor",                 label: "Polea Motor" },
+    { key: "Potencia Motor",              label: "Potencia Motor" },
+    { key: "RPM Motor",                   label: "RPM Motor" },
+    { key: "%Estructura",                 label: "%Estructura" },
+    { key: "%Balance",                    label: "%Balance" },
+  ];
+
+  const tendCols = [
+    { key: "NO_key",             label: "Pozo" },
+    { key: "n_puntos",           label: "Puntos" },
+    { key: "pendiente_por_mes",  label: "Pend/mes", render: (v: number) => <span className="text-sky-400 font-semibold">{v?.toFixed(3)}</span> },
+    { key: "delta_total",        label: "Delta",    render: (v: number) => v?.toFixed(1) },
+    { key: "valor_inicial",      label: "V.ini",    render: (v: number) => v?.toFixed(1) },
+    { key: "valor_final",        label: "V.fin",    render: (v: number) => v?.toFixed(1) },
+    { key: "fecha_inicial",      label: "Desde",    render: (v: string) => v?.slice(0,10) },
+    { key: "fecha_final",        label: "Hasta",    render: (v: string) => v?.slice(0,10) },
+  ];
+
+  const topTend = [...tendencias].sort((a,b) => a.pendiente_por_mes - b.pendiente_por_mes).slice(0,30);
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-xl font-bold text-slate-100">📊 Estadísticas (última medición por pozo)</h2>
-      </div>
+      <h2 className="text-xl font-bold text-slate-100">📊 Estadísticas (última medición por pozo)</h2>
 
       {loading && <p className="text-slate-500 text-sm animate-pulse">Cargando snapshot…</p>}
 
@@ -198,77 +212,28 @@ export default function EstadisticasPage() {
                 <div className="flex gap-2">
                   {origenOpts.map((o) => (
                     <label key={o} className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={origenSel.includes(o)}
-                        onChange={(e) =>
-                          setOrigenSel((prev) =>
-                            e.target.checked ? [...prev, o] : prev.filter((x) => x !== o)
-                          )
-                        }
-                        className="accent-sky-400"
-                      />
+                      <input type="checkbox" checked={origenSel.includes(o)}
+                        onChange={(e) => setOrigenSel((prev) => e.target.checked ? [...prev, o] : prev.filter((x) => x !== o))}
+                        className="accent-sky-400" />
                       {o}
                     </label>
                   ))}
                 </div>
               </div>
               <div>
-                <label className="text-xs text-slate-400 block mb-1">
-                  Rango Sumergencia: {sumRange[0].toFixed(0)} – {sumRange[1].toFixed(0)}
-                </label>
-                <input
-                  type="range"
-                  min={0} max={sumRange[1]} step={1}
-                  value={sumRange[0]}
-                  onChange={(e) => setSumRange([+e.target.value, sumRange[1]])}
-                  className="accent-sky-400 w-32"
-                />
-                <input
-                  type="range"
-                  min={sumRange[0]} max={5000} step={1}
-                  value={sumRange[1]}
-                  onChange={(e) => setSumRange([sumRange[0], +e.target.value])}
-                  className="accent-sky-400 w-32 ml-2"
-                />
+                <label className="text-xs text-slate-400 block mb-1">Rango Sumergencia: {sumRange[0].toFixed(0)} – {sumRange[1].toFixed(0)}</label>
+                <input type="range" min={0} max={sumRange[1]} step={1} value={sumRange[0]} onChange={(e) => setSumRange([+e.target.value, sumRange[1]])} className="accent-sky-400 w-32" />
+                <input type="range" min={sumRange[0]} max={5000} step={1} value={sumRange[1]} onChange={(e) => setSumRange([sumRange[0], +e.target.value])} className="accent-sky-400 w-32 ml-2" />
               </div>
               <div>
-                <label className="text-xs text-slate-400 block mb-1">
-                  Rango %Estructura: {estRange[0].toFixed(1)} – {estRange[1].toFixed(1)}
-                </label>
-                <input
-                  type="range"
-                  min={0} max={estRange[1]} step={0.1}
-                  value={estRange[0]}
-                  onChange={(e) => setEstRange([+e.target.value, estRange[1]])}
-                  className="accent-sky-400 w-32"
-                />
-                <input
-                  type="range"
-                  min={estRange[0]} max={200} step={0.1}
-                  value={estRange[1]}
-                  onChange={(e) => setEstRange([estRange[0], +e.target.value])}
-                  className="accent-sky-400 w-32 ml-2"
-                />
+                <label className="text-xs text-slate-400 block mb-1">Rango %Estructura: {estRange[0].toFixed(1)} – {estRange[1].toFixed(1)}</label>
+                <input type="range" min={0} max={estRange[1]} step={0.1} value={estRange[0]} onChange={(e) => setEstRange([+e.target.value, estRange[1]])} className="accent-sky-400 w-32" />
+                <input type="range" min={estRange[0]} max={200} step={0.1} value={estRange[1]} onChange={(e) => setEstRange([estRange[0], +e.target.value])} className="accent-sky-400 w-32 ml-2" />
               </div>
               <div>
-                <label className="text-xs text-slate-400 block mb-1">
-                  Rango %Balance: {balRange[0].toFixed(1)} – {balRange[1].toFixed(1)}
-                </label>
-                <input
-                  type="range"
-                  min={0} max={balRange[1]} step={0.1}
-                  value={balRange[0]}
-                  onChange={(e) => setBalRange([+e.target.value, balRange[1]])}
-                  className="accent-sky-400 w-32"
-                />
-                <input
-                  type="range"
-                  min={balRange[0]} max={200} step={0.1}
-                  value={balRange[1]}
-                  onChange={(e) => setBalRange([balRange[0], +e.target.value])}
-                  className="accent-sky-400 w-32 ml-2"
-                />
+                <label className="text-xs text-slate-400 block mb-1">Rango %Balance: {balRange[0].toFixed(1)} – {balRange[1].toFixed(1)}</label>
+                <input type="range" min={0} max={balRange[1]} step={0.1} value={balRange[0]} onChange={(e) => setBalRange([+e.target.value, balRange[1]])} className="accent-sky-400 w-32" />
+                <input type="range" min={balRange[0]} max={200} step={0.1} value={balRange[1]} onChange={(e) => setBalRange([balRange[0], +e.target.value])} className="accent-sky-400 w-32 ml-2" />
               </div>
             </div>
           </div>
@@ -276,139 +241,53 @@ export default function EstadisticasPage() {
           {/* KPIs filtrados */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <KPICard title="Pozos filtrados" value={snapF.length} color="sky" />
-            <KPICard title="Sumer. < 0"      value={badSum.length}  color={badSum.length > 0 ? "red" : "default"} />
-            <KPICard title="PB anómalo"       value={badPB.length}  color={badPB.length > 0 ? "yellow" : "default"} />
+            <KPICard title="Sumer. < 0"      value={badSum.length} color={badSum.length > 0 ? "red" : "default"} />
+            <KPICard title="PB anómalo"       value={badPB.length} color={badPB.length > 0 ? "yellow" : "default"} />
             <KPICard title="PB faltante"      value={snapF.filter(r => r.PB == null).length} />
           </div>
 
           {/* Tabla snapshot */}
-          <div className="card p-0 overflow-hidden">
-            <div className="px-4 py-3 border-b border-[#334155]">
-              <h3 className="text-sm font-medium text-slate-300">📋 Pozos — última medición (filtrados)</h3>
-            </div>
-            <div className="overflow-x-auto max-h-80 overflow-y-auto">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 z-10">
-                  <tr>
-                    {["NO_key","Bateria","Tipo AIB","ORIGEN","SE","DT_plot","Días","PE","PB","NM","NC","ND","Sumergencia","Sumergencia_base","AIB Carrera","Sentido giro","Tipo Contrapesos","Distancia contrapesos (cm)","Contrapeso actual","Contrapeso ideal","AIBEB_Torque max contrapeso","Bba Diam Pistón","Bba Llenado","GPM","Caudal bruto efec","Polea Motor","Potencia Motor","RPM Motor","%Estructura","%Balance"].map((h) => (
-                      <th key={h} className="bg-[#1e293b] border-b border-[#334155] px-3 py-2 whitespace-nowrap">
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...snapF]
-                    .sort((a, b) => (a.Dias_desde_ultima || 0) - (b.Dias_desde_ultima || 0))
-                    .map((r, i) => (
-                    <tr key={i}>
-                      <td className="px-3 py-1.5 font-mono text-slate-300 whitespace-nowrap">{r.NO_key}</td>
-                      <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{r.Bateria || "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{r["Tipo AIB"] || "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r.ORIGEN || "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r.SE || "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{r.DT_plot?.slice(0,10) || "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r.Dias_desde_ultima?.toFixed(0) || "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r.PE ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r.PB ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r.NM ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r.NC ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r.ND ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-sky-300 font-semibold">
-                        {r.Sumergencia != null ? r.Sumergencia.toFixed(1) : "—"}
-                      </td>
-                      <td className="px-3 py-1.5 text-slate-400">{r.Sumergencia_base ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["AIB Carrera"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["Sentido giro"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["Tipo Contrapesos"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["Distancia contrapesos (cm)"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["Contrapeso actual"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["Contrapeso ideal"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["AIBEB_Torque max contrapeso"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["Bba Diam Pistón"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["Bba Llenado"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r.GPM ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["Caudal bruto efec"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["Polea Motor"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["Potencia Motor"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["RPM Motor"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["%Estructura"] ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{r["%Balance"] ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          <div>
+            <h3 className="text-sm font-medium text-slate-300 mb-2">📋 Pozos — última medición (filtrados)</h3>
+            <SortableTable
+              cols={snapCols}
+              rows={[...snapF].sort((a,b) => (a.Dias_desde_ultima||0) - (b.Dias_desde_ultima||0))}
+              title="pozos_ultima_medicion"
+              maxHeight="320px"
+            />
           </div>
 
           {/* Gráficos snapshot */}
           <div>
-            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">
-              📈 Gráficos (snapshot, DIN+NIV mezclados)
-            </h3>
+            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">📈 Gráficos (snapshot, DIN+NIV mezclados)</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Por origen */}
-              <div className="card p-0 overflow-hidden">
-                <div className="px-4 py-2 border-b border-[#334155] text-xs text-slate-400">Pozos por ORIGEN</div>
-                <div className="p-3">
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={origenCount}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                      <XAxis dataKey="ORIGEN" tick={{ fill: "#94a3b8", fontSize: 11 }} stroke="#64748b" />
-                      <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} stroke="#64748b" />
-                      <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid #334155" }} />
-                      <Bar dataKey="Pozos" fill="#38bdf8" radius={[4,4,0,0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="card p-3">
+                <PlotlyChart
+                  title="Pozos por ORIGEN"
+                  data={[{ type: "bar", x: origenCount.map(d=>d.ORIGEN), y: origenCount.map(d=>d.Pozos), marker: { color: "#38bdf8" } }]}
+                  height={220}
+                />
               </div>
-
-              {/* Histograma días */}
-              <div className="card p-0 overflow-hidden">
-                <div className="px-4 py-2 border-b border-[#334155] text-xs text-slate-400">Antigüedad de última medición (días)</div>
-                <div className="p-3">
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={histDias}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                      <XAxis dataKey="x" tick={{ fill: "#94a3b8", fontSize: 10 }} stroke="#64748b" />
-                      <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} stroke="#64748b" />
-                      <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid #334155" }} />
-                      <Bar dataKey="y" fill="#22c55e" radius={[2,2,0,0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="card p-3">
+                <PlotlyChart
+                  title="Antigüedad de última medición (días)"
+                  data={[{ type: "bar", x: histDias.map(d=>d.x), y: histDias.map(d=>d.y), marker: { color: "#22c55e" } }]}
+                  height={220}
+                />
               </div>
-
-              {/* Histograma Sumergencia */}
-              <div className="card p-0 overflow-hidden">
-                <div className="px-4 py-2 border-b border-[#334155] text-xs text-slate-400">Distribución de Sumergencia</div>
-                <div className="p-3">
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={histSum}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                      <XAxis dataKey="x" tick={{ fill: "#94a3b8", fontSize: 10 }} stroke="#64748b" />
-                      <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} stroke="#64748b" />
-                      <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid #334155" }} />
-                      <Bar dataKey="y" fill="#38bdf8" radius={[2,2,0,0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="card p-3">
+                <PlotlyChart
+                  title="Distribución de Sumergencia"
+                  data={[{ type: "bar", x: histSum.map(d=>d.x), y: histSum.map(d=>d.y), marker: { color: "#38bdf8" } }]}
+                  height={220}
+                />
               </div>
-
-              {/* Histograma PB */}
-              <div className="card p-0 overflow-hidden">
-                <div className="px-4 py-2 border-b border-[#334155] text-xs text-slate-400">Distribución de PB</div>
-                <div className="p-3">
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={histPB}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                      <XAxis dataKey="x" tick={{ fill: "#94a3b8", fontSize: 10 }} stroke="#64748b" />
-                      <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} stroke="#64748b" />
-                      <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid #334155" }} />
-                      <Bar dataKey="y" fill="#a78bfa" radius={[2,2,0,0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="card p-3">
+                <PlotlyChart
+                  title="Distribución de PB"
+                  data={[{ type: "bar", x: histPB.map(d=>d.x), y: histPB.map(d=>d.y), marker: { color: "#a78bfa" } }]}
+                  height={220}
+                />
               </div>
             </div>
           </div>
@@ -417,92 +296,55 @@ export default function EstadisticasPage() {
           {ebData.length > 0 && (
             <div className="card p-0 overflow-hidden">
               <div className="px-4 py-2 border-b border-[#334155] text-xs text-slate-400">
-                🧰 %Estructura vs %Balance (DIN-only)
+                🧰 DIN-only (porque %Estructura/%Balance y Llenado suelen venir de DIN)
               </div>
               <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <ResponsiveContainer width="100%" height={280}>
-                  <ScatterChart margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis dataKey="x" name="%Estructura" tick={{ fill: "#94a3b8", fontSize: 11 }} stroke="#64748b" label={{ value: "%Estructura", position: "insideBottom", offset: -4, fill: "#64748b", fontSize: 11 }} />
-                    <YAxis dataKey="y" name="%Balance" tick={{ fill: "#94a3b8", fontSize: 11 }} stroke="#64748b" label={{ value: "%Balance", angle: -90, position: "insideLeft", fill: "#64748b", fontSize: 11 }} />
-                    <Tooltip
-                      cursor={{ strokeDasharray: "3 3" }}
-                      contentStyle={{ background: "#1e293b", border: "1px solid #334155" }}
-                      content={({ payload }) => {
-                        const d = payload?.[0]?.payload;
-                        if (!d) return null;
-                        return (
-                          <div className="text-xs p-2">
-                            <p className="text-slate-200 font-mono">{d.name}</p>
-                            <p className="text-slate-400">%Estructura: {d.x}</p>
-                            <p className="text-slate-400">%Balance: {d.y}</p>
-                          </div>
-                        );
-                      }}
-                    />
-                    <Scatter data={ebData} fill="#f97316" opacity={0.7} />
-                  </ScatterChart>
-                </ResponsiveContainer>
-                <div className="overflow-x-auto overflow-y-auto max-h-72">
-                  <table className="w-full text-xs">
-                    <thead className="sticky top-0 z-10">
-                      <tr>
-                        {["#","NO_key","ORIGEN","%Estructura","%Balance"].map((h) => (
-                          <th key={h} className="bg-[#1e293b] border-b border-[#334155] px-3 py-2 text-left whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...ebData]
-                        .sort((a, b) => (a.x ?? 0) - (b.x ?? 0))
-                        .map((r, i) => (
-                          <tr key={i} className="border-b border-[#334155]">
-                            <td className="px-3 py-1.5 text-slate-500">{i + 1}</td>
-                            <td className="px-3 py-1.5 font-mono text-slate-300 whitespace-nowrap">{r.name}</td>
-                            <td className="px-3 py-1.5 text-slate-400">DIN</td>
-                            <td className="px-3 py-1.5 text-slate-400">{r.x?.toFixed(2)}</td>
-                            <td className="px-3 py-1.5 text-slate-400">{r.y?.toFixed(2)}</td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
+                <PlotlyChart
+                  title="%Estructura vs %Balance (snapshot, DIN-only)"
+                  data={[{
+                    type: "scatter", mode: "markers",
+                    x: ebData.map(d=>d.x), y: ebData.map(d=>d.y),
+                    text: ebData.map(d=>d.name),
+                    hovertemplate: "<b>%{text}</b><br>%Estructura: %{x}<br>%Balance: %{y}<extra></extra>",
+                    marker: { color: "#f97316", opacity: 0.7, size: 7 },
+                  }]}
+                  layout={{ xaxis: { title: { text: "%Estructura" } }, yaxis: { title: { text: "%Balance" } } }}
+                  height={280}
+                />
+                <SortableTable
+                  cols={[
+                    { key: "name",    label: "NO_key" },
+                    { key: "ORIGEN",  label: "ORIGEN" },
+                    { key: "x",       label: "%Estructura", render: (v:number) => v?.toFixed(2) },
+                    { key: "y",       label: "%Balance",    render: (v:number) => v?.toFixed(2) },
+                  ]}
+                  rows={[...ebData].sort((a,b)=>(a.x??0)-(b.x??0)).map(d=>({...d, ORIGEN:"DIN"}))}
+                  title="estructura_balance"
+                  maxHeight="280px"
+                />
               </div>
             </div>
           )}
 
           {/* Pozos por mes */}
           <div className="space-y-2">
-            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-              🛢️ Pozos medidos por mes
-            </h3>
+            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">🛢️ Pozos medidos por mes</h3>
             {ultimoMes && (
-              <p className="text-sm text-slate-300">
-                📌 Último mes ({ultimoMes}): <strong className="text-sky-400">{ultimoVal}</strong> pozos medidos
-              </p>
+              <p className="text-sm text-slate-300">📌 Último mes ({ultimoMes}): <strong className="text-sky-400">{ultimoVal}</strong> pozos medidos</p>
             )}
             {ppm.length > 0 && (
-              <div className="card p-0 overflow-hidden">
-                <div className="p-3">
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={ppm}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                      <XAxis dataKey="Mes" tick={{ fill: "#94a3b8", fontSize: 10 }} stroke="#64748b" />
-                      <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} stroke="#64748b" />
-                      <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid #334155" }} />
-                      <Bar dataKey="Pozos_medidos" fill="#38bdf8" radius={[3,3,0,0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="card p-3">
+                <PlotlyChart
+                  data={[{ type: "bar", x: ppm.map(d=>d.Mes), y: ppm.map(d=>d.Pozos_medidos), marker: { color: "#38bdf8" } }]}
+                  height={220}
+                />
               </div>
             )}
           </div>
 
           {/* Cobertura DIN vs NIV */}
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-              ✅ Cobertura DIN vs NIV
-            </h3>
+            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">✅ Cobertura DIN vs NIV</h3>
             <div className="flex flex-wrap gap-3 items-end">
               <div>
                 <label className="text-xs text-slate-400 block mb-1">Desde</label>
@@ -527,22 +369,19 @@ export default function EstadisticasPage() {
                 Calcular
               </button>
             </div>
-
             {cobertura && (
               <>
                 <div className="grid grid-cols-3 gap-3">
-                  <KPICard title="Pozos en ventana"     value={cobertura.total_pozos} />
-                  <KPICard title="Con DIN"              value={cobertura.pozos_con_din} color="green" />
-                  <KPICard title="Sin DIN"              value={cobertura.pozos_sin_din} color={cobertura.pozos_sin_din > 0 ? "red" : "default"} />
+                  <KPICard title="Pozos en ventana" value={cobertura.total_pozos} />
+                  <KPICard title="Con DIN"           value={cobertura.pozos_con_din} color="green" />
+                  <KPICard title="Sin DIN"           value={cobertura.pozos_sin_din} color={cobertura.pozos_sin_din > 0 ? "red" : "default"} />
                 </div>
                 {cobertura.lista_sin_din.length > 0 && (
                   <details className="card text-xs">
                     <summary className="cursor-pointer text-slate-400 hover:text-slate-200">
                       Ver {cobertura.lista_sin_din.length} pozos sin DIN en la ventana
                     </summary>
-                    <p className="mt-2 text-slate-400 break-words">
-                      {cobertura.lista_sin_din.join(", ")}
-                    </p>
+                    <p className="mt-2 text-slate-400 break-words">{cobertura.lista_sin_din.join(", ")}</p>
                   </details>
                 )}
               </>
@@ -551,36 +390,28 @@ export default function EstadisticasPage() {
 
           {/* Calidad del dato */}
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-              🧪 Calidad del dato
-            </h3>
+            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">🧪 Calidad del dato</h3>
             <div className="grid grid-cols-3 gap-3">
-              <KPICard title="Sumergencia < 0" value={badSum.length}  color={badSum.length > 0 ? "red" : "green"} />
-              <KPICard title="PB anómalo (IQR)" value={badPB.length} color={badPB.length > 0 ? "yellow" : "green"} />
-              <KPICard title="PB faltante"      value={snapF.filter(r=>r.PB==null).length} />
+              <KPICard title="Sumergencia < 0"  value={badSum.length} color={badSum.length > 0 ? "red" : "green"} />
+              <KPICard title="PB anómalo (IQR)" value={badPB.length}  color={badPB.length > 0 ? "yellow" : "green"} />
+              <KPICard title="PB faltante"       value={snapF.filter(r=>r.PB==null).length} />
             </div>
             {badSum.length > 0 && (
               <details className="card text-xs">
                 <summary className="cursor-pointer text-slate-400">Pozos con Sumergencia &lt; 0</summary>
-                <div className="mt-2 overflow-x-auto">
-                  <table className="text-xs w-full">
-                    <thead><tr>
-                      {["NO_key","ORIGEN","DT_plot","PB","Sumergencia"].map(h=>(
-                        <th key={h} className="text-left px-2 py-1 text-slate-500">{h}</th>
-                      ))}
-                    </tr></thead>
-                    <tbody>
-                      {badSum.map((r,i)=>(
-                        <tr key={i} className="border-t border-[#334155]">
-                          <td className="px-2 py-1 font-mono">{r.NO_key}</td>
-                          <td className="px-2 py-1">{r.ORIGEN}</td>
-                          <td className="px-2 py-1">{r.DT_plot?.slice(0,10)}</td>
-                          <td className="px-2 py-1">{r.PB}</td>
-                          <td className="px-2 py-1 text-red-400">{r.Sumergencia?.toFixed(1)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="mt-2">
+                  <SortableTable
+                    cols={[
+                      { key: "NO_key",      label: "NO_key" },
+                      { key: "ORIGEN",      label: "ORIGEN" },
+                      { key: "DT_plot",     label: "DT_plot", render: (v:string) => v?.slice(0,10) },
+                      { key: "PB",          label: "PB" },
+                      { key: "Sumergencia", label: "Sumergencia", render: (v:number) => <span className="text-red-400">{v?.toFixed(1)}</span> },
+                    ]}
+                    rows={badSum}
+                    title="sumergencia_negativa"
+                    maxHeight="240px"
+                  />
                 </div>
               </details>
             )}
@@ -588,9 +419,7 @@ export default function EstadisticasPage() {
 
           {/* Tendencias */}
           <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-              📈 Pozos con tendencia en aumento
-            </h3>
+            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">📈 Pozos con tendencia en aumento</h3>
             <div className="flex flex-wrap gap-4 items-end">
               <div>
                 <label className="text-xs text-slate-400 block mb-1">Variable</label>
@@ -601,13 +430,11 @@ export default function EstadisticasPage() {
               </div>
               <div>
                 <label className="text-xs text-slate-400 block mb-1">Mín. puntos</label>
-                <input type="number" min={2} max={20} value={minPts}
-                  onChange={(e) => setMinPts(+e.target.value)}
+                <input type="number" min={2} max={20} value={minPts} onChange={(e) => setMinPts(+e.target.value)}
                   className="bg-[#0f172a] border border-[#334155] rounded px-3 py-1.5 text-sm text-slate-200 w-20" />
               </div>
               <label className="flex items-center gap-2 text-sm text-slate-300">
-                <input type="checkbox" checked={soloPos} onChange={(e) => setSoloPos(e.target.checked)}
-                  className="accent-sky-400" />
+                <input type="checkbox" checked={soloPos} onChange={(e) => setSoloPos(e.target.checked)} className="accent-sky-400" />
                 Solo pendiente positiva
               </label>
             </div>
@@ -616,51 +443,24 @@ export default function EstadisticasPage() {
 
             {!loadingTend && tendencias.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Tabla */}
-                <div className="card p-0 overflow-hidden">
-                  <div className="overflow-x-auto max-h-80">
-                    <table className="text-xs">
-                      <thead className="sticky top-0">
-                        <tr>
-                          {["Pozo","Puntos","Pend/mes","Delta","V.ini","V.fin","Desde","Hasta"].map(h=>(
-                            <th key={h} className="bg-[#1e293b] border-b border-[#334155] px-3 py-2 whitespace-nowrap">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {tendencias.slice(0,100).map((r,i) => (
-                          <tr key={i} className="border-b border-[#334155]">
-                            <td className="px-3 py-1.5 font-mono text-slate-300">{r.NO_key}</td>
-                            <td className="px-3 py-1.5 text-slate-400">{r.n_puntos}</td>
-                            <td className="px-3 py-1.5 text-sky-400 font-semibold">{r.pendiente_por_mes.toFixed(3)}</td>
-                            <td className="px-3 py-1.5 text-slate-400">{r.delta_total.toFixed(1)}</td>
-                            <td className="px-3 py-1.5 text-slate-400">{r.valor_inicial.toFixed(1)}</td>
-                            <td className="px-3 py-1.5 text-slate-400">{r.valor_final.toFixed(1)}</td>
-                            <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">{r.fecha_inicial.slice(0,10)}</td>
-                            <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">{r.fecha_final.slice(0,10)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Gráfico top 30 */}
-                <div className="card p-0 overflow-hidden">
-                  <div className="px-4 py-2 border-b border-[#334155] text-xs text-slate-400">
-                    Top 30 — Pendiente por mes ({trendVar})
-                  </div>
-                  <div className="p-3">
-                    <ResponsiveContainer width="100%" height={380}>
-                      <BarChart data={topTend} layout="vertical" margin={{ left: 60 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                        <XAxis type="number" tick={{ fill: "#94a3b8", fontSize: 10 }} stroke="#64748b" />
-                        <YAxis type="category" dataKey="NO_key" tick={{ fill: "#94a3b8", fontSize: 9 }} stroke="#64748b" width={55} />
-                        <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid #334155" }} />
-                        <Bar dataKey="pendiente_por_mes" fill="#f97316" radius={[0,3,3,0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                <SortableTable
+                  cols={tendCols}
+                  rows={tendencias.slice(0,100)}
+                  title="tendencias"
+                  maxHeight="380px"
+                />
+                <div className="card p-3">
+                  <PlotlyChart
+                    title={`Top 30 — Pendiente por mes (${trendVar})`}
+                    data={[{
+                      type: "bar", orientation: "h",
+                      x: topTend.map(d=>d.pendiente_por_mes),
+                      y: topTend.map(d=>d.NO_key),
+                      marker: { color: "#f97316" },
+                    }]}
+                    layout={{ margin: { l: 80 }, yaxis: { autorange: "reversed" } }}
+                    height={380}
+                  />
                 </div>
               </div>
             )}
@@ -668,23 +468,22 @@ export default function EstadisticasPage() {
         </>
       )}
 
-      {/* Semáforo AIB — sección independiente */}
+      {/* Semáforo AIB */}
       <div className="border-t border-[#334155] pt-8">
         <h2 className="text-lg font-bold text-slate-100 mb-4">🚦 Semáforo AIB (SE = AIB)</h2>
-
         <SemaforoAIB
-            rows={semaforoData?.rows ?? []}
-            kpis={{
-              total:    semaforoData?.total    ?? 0,
-              criticos: semaforoData?.criticos ?? 0,
-              alertas:  semaforoData?.alertas  ?? 0,
-              normales: semaforoData?.normales ?? 0,
-              sin_datos:semaforoData?.sin_datos ?? 0,
-            }}
-            onRefresh={() => loadSemaforo(sumMedia, sumAlta, llenOk, llenBajo)}
-            sumMedia={sumMedia} sumAlta={sumAlta} llenOk={llenOk} llenBajo={llenBajo}
-            setSumMedia={setSumMedia} setSumAlta={setSumAlta} setLlenOk={setLlenOk} setLlenBajo={setLlenBajo}
-          />
+          rows={semaforoData?.rows ?? []}
+          kpis={{
+            total:     semaforoData?.total    ?? 0,
+            criticos:  semaforoData?.criticos ?? 0,
+            alertas:   semaforoData?.alertas  ?? 0,
+            normales:  semaforoData?.normales ?? 0,
+            sin_datos: semaforoData?.sin_datos ?? 0,
+          }}
+          onRefresh={() => loadSemaforo(sumMedia, sumAlta, llenOk, llenBajo)}
+          sumMedia={sumMedia} sumAlta={sumAlta} llenOk={llenOk} llenBajo={llenBajo}
+          setSumMedia={setSumMedia} setSumAlta={setSumAlta} setLlenOk={setLlenOk} setLlenBajo={setLlenBajo}
+        />
       </div>
     </div>
   );

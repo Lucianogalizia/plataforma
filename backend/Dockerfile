@@ -15,4 +15,7 @@ RUN mkdir -p /app/assets
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --log-level debug"]
+# CLAVE: nos paramos en /app/backend para que "api", "core", "ia" existan en sys.path
+WORKDIR /app/backend
+
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --log-level debug"]

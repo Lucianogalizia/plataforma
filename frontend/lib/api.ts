@@ -27,6 +27,49 @@ async function apiFetch<T>(
 }
 
 // ==========================================================
+// CACHE GLOBAL (solo para GET)
+// - Reutiliza respuestas entre pestañas (mientras no recargues el navegador)
+// - TTL configurable
+// - Deduplica requests simultáneos (misma URL -> 1 solo fetch)
+// ==========================================================
+
+type CacheEntry = { ts: number; data: unknown };
+const GET_CACHE = new Map<string, CacheEntry>();
+const INFLIGHT = new Map<string, Promise<unknown>>();
+
+function cacheKey(path: string) {
+  // path ya incluye querystring (si aplica)
+  return path;
+}
+
+async function apiGetCached<T>(path: string, ttlMs = 3 * 60 * 1000): Promise<T> {
+  const key = cacheKey(path);
+  const now = Date.now();
+
+  const hit = GET_CACHE.get(key);
+  if (hit && now - hit.ts < ttlMs) return hit.data as T;
+
+  const inflight = INFLIGHT.get(key);
+  if (inflight) return inflight as Promise<T>;
+
+  const p: Promise<T> = (async () => {
+    const data = await apiFetch<T>(path);
+    GET_CACHE.set(key, { ts: Date.now(), data });
+    return data;
+  })().finally(() => {
+    INFLIGHT.delete(key);
+  });
+
+  INFLIGHT.set(key, p as Promise<unknown>);
+  return p;
+}
+
+export function clearApiCache(prefix?: string) {
+  if (!prefix) return GET_CACHE.clear();
+  for (const k of GET_CACHE.keys()) if (k.startsWith(prefix)) GET_CACHE.delete(k);
+}
+
+// ==========================================================
 // TIPOS
 // ==========================================================
 
@@ -261,23 +304,23 @@ export interface FilaDiagGlobal {
 export const api = {
   // ── Pozos ──────────────────────────────────────────────
   getPozos: (soloConDin = false) =>
-    apiFetch<Pozo>(`/api/din/pozos?solo_con_din=${soloConDin}`),
+    apiGetCached<Pozo>(`/api/din/pozos?solo_con_din=${soloConDin}`, 30 * 60 * 1000),
 
   // ── Mediciones de un pozo ──────────────────────────────
   getMediciones: (pozo: string) =>
-    apiFetch<{ pozo: string; total: number; mediciones: Medicion[]; opciones_din: OpcionDin[] }>(
+    apiGetCached<{ pozo: string; total: number; mediciones: Medicion[]; opciones_din: OpcionDin[] }>(
       `/api/din/mediciones/${encodeURIComponent(pozo)}`
     ),
 
   // ── Carta Dinamométrica CS ─────────────────────────────
   getCartaSuperficie: (path: string) =>
-    apiFetch<{ n_puntos: number; puntos: PuntoCS[] }>(
+    apiGetCached<{ n_puntos: number; puntos: PuntoCS[] }>(
       `/api/din/carta-superficie?path=${encodeURIComponent(path)}`
     ),
 
   // ── Histórico de Sumergencia ───────────────────────────
   getHistoricoSumergencia: (pozo: string) =>
-    apiFetch<{ pozo: string; serie: SerieSumergencia[] }>(
+    apiGetCached<{ pozo: string; serie: SerieSumergencia[] }>(
       `/api/din/historico-sumergencia/${encodeURIComponent(pozo)}`
     ),
 
@@ -299,7 +342,7 @@ export const api = {
     if (params?.est_max != null) qs.set("est_max", String(params.est_max));
     if (params?.bal_min != null) qs.set("bal_min", String(params.bal_min));
     if (params?.bal_max != null) qs.set("bal_max", String(params.bal_max));
-    return apiFetch<{ total: number; snap: SnapRow[]; kpis: SnapKpis }>(
+    return apiGetCached<{ total: number; snap: SnapRow[]; kpis: SnapKpis }>(
       `/api/din/snapshot?${qs}`
     );
   },
@@ -310,20 +353,21 @@ export const api = {
     min_pts?: number;
     solo_positiva?: boolean;
     top?: number;
-  }) => {
+  }
+) => {
     const qs = new URLSearchParams();
     if (params?.variable) qs.set("variable", params.variable);
     if (params?.min_pts != null) qs.set("min_pts", String(params.min_pts));
     if (params?.solo_positiva != null) qs.set("solo_positiva", String(params.solo_positiva));
     if (params?.top != null) qs.set("top", String(params.top));
-    return apiFetch<{ variable: string; pozos: TendenciaPozo[] }>(
+    return apiGetCached<{ variable: string; pozos: TendenciaPozo[] }>(
       `/api/din/tendencias?${qs}`
     );
   },
 
   // ── Pozos por mes ──────────────────────────────────────
   getPozosPorMes: () =>
-    apiFetch<{ ultimo_mes: string; ultimo_valor: number; serie: PozosMes[] }>(
+    apiGetCached<{ ultimo_mes: string; ultimo_valor: number; serie: PozosMes[] }>(
       "/api/din/pozos-por-mes"
     ),
 
@@ -338,7 +382,7 @@ export const api = {
       fecha_hasta: params.fecha_hasta,
       modo: params.modo || "historico",
     });
-    return apiFetch<Cobertura>(`/api/din/cobertura?${qs}`);
+    return apiGetCached<Cobertura>(`/api/din/cobertura?${qs}`);
   },
 
   // ==========================================================
@@ -357,13 +401,13 @@ export const api = {
     if (params?.dias_min != null) qs.set("dias_min", String(params.dias_min));
     if (params?.dias_max != null) qs.set("dias_max", String(params.dias_max));
     if (params?.baterias)         qs.set("baterias", params.baterias);
-    return apiFetch<{ total: number; puntos: PuntoMapa[] }>(
+    return apiGetCached<{ total: number; puntos: PuntoMapa[] }>(
       `/api/din/snapshot-mapa?${qs}`
     );
   },
 
   getBaterias: () =>
-    apiFetch<{ baterias: string[] }>("/api/mapa/baterias"),
+    apiGetCached<{ baterias: string[] }>("/api/mapa/baterias", 30 * 60 * 1000),
 
   getSemaforoAib: async (params?: {
     sum_media?: number;
@@ -378,7 +422,7 @@ export const api = {
     if (params?.llen_ok != null)    qs.set("llen_ok",    String(params.llen_ok));
     if (params?.llen_bajo != null)  qs.set("llen_bajo",  String(params.llen_bajo));
     if (params?.solo_se_aib != null) qs.set("solo_se_aib", String(params.solo_se_aib));
-    const raw = await apiFetch<{
+    const raw = await apiGetCached<{
       total: number;
       counts: { total_aib?: number; normal?: number; alerta?: number; critico?: number; sin_datos?: number };
       puntos: SemaforoRow[];
@@ -397,7 +441,7 @@ export const api = {
   // VALIDACIONES
   // ==========================================================
   getValidaciones: (pozo: string) =>
-    apiFetch<{ pozo: string; mediciones: Record<string, ValidacionEstado> }>(
+    apiGetCached<{ pozo: string; mediciones: Record<string, ValidacionEstado> }>(
       `/api/validaciones/${encodeURIComponent(pozo)}`
     ),
 
@@ -426,14 +470,14 @@ export const api = {
     if (params?.sum_max != null) qs.set("sum_max", String(params.sum_max));
     if (params?.dias_max != null) qs.set("dias_max", String(params.dias_max));
     if (params?.baterias) qs.set("baterias", params.baterias);
-    return apiFetch<{ rows: unknown[] }>(`/api/validaciones/tabla?${qs}`);
+    return apiGetCached<{ rows: unknown[] }>(`/api/validaciones/tabla?${qs}`);
   },
 
   // ==========================================================
   // DIAGNÓSTICOS
   // ==========================================================
   getDiagnostico: (pozo: string) =>
-    apiFetch<Diagnostico>(`/api/diagnosticos/${encodeURIComponent(pozo)}`),
+    apiGetCached<Diagnostico>(`/api/diagnosticos/${encodeURIComponent(pozo)}`),
 
   generarDiagnostico: (pozo: string) =>
     apiFetch<Diagnostico>(`/api/diagnosticos/${encodeURIComponent(pozo)}/generar`, {
@@ -441,10 +485,10 @@ export const api = {
     }),
 
   getTablaGlobalDiag: () =>
-    apiFetch<{ total: number; rows: FilaDiagGlobal[] }>("/api/diagnosticos/tabla-global"),
+    apiGetCached<{ total: number; rows: FilaDiagGlobal[] }>("/api/diagnosticos/tabla-global"),
 
   getEstadoCache: () =>
-    apiFetch<{
+    apiGetCached<{
       total_pozos_con_din: number;
       con_diagnostico: number;
       pendientes: number;
@@ -463,7 +507,7 @@ export const api = {
     apiFetch<{ status: string; uptime_seg: number; timestamp: string }>("/api/health"),
 
   getInfo: () =>
-    apiFetch<{
+    apiGetCached<{
       version: string;
       gcs_bucket: string;
       gcs_prefix: string;
@@ -472,7 +516,7 @@ export const api = {
       din_count: number;
       niv_count: number;
       uptime_seg: number;
-    }>("/api/info"),
+    }>("/api/info", 30 * 1000),
 };
 
 export default api;

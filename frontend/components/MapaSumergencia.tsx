@@ -1,36 +1,60 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PuntoMapa } from "@/lib/api";
 
 interface MapaSumergenciaProps {
   puntos: PuntoMapa[];
   height?: number;
+  loading?: boolean; // ✅ agregado
 }
 
 // Renderizado usando canvas básico (fallback sin mapas externos)
 // Se integra con deck.gl cuando está disponible
-export default function MapaSumergencia({ puntos, height = 500 }: MapaSumergenciaProps) {
+export default function MapaSumergencia({
+  puntos,
+  height = 500,
+  loading = false,
+}: MapaSumergenciaProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; punto: PuntoMapa } | null>(null);
 
-  // Proyección simple: lat/lon → canvas pixels
-  const pts = puntos.filter((p) => p.lat != null && p.lon != null && p.Sumergencia != null);
+  // Filtrar puntos válidos (coords + sumergencia)
+  const pts = useMemo(
+    () => puntos.filter((p) => p.lat != null && p.lon != null && p.Sumergencia != null),
+    [puntos]
+  );
 
-  const latMin = Math.min(...pts.map((p) => p.lat));
-  const latMax = Math.max(...pts.map((p) => p.lat));
-  const lonMin = Math.min(...pts.map((p) => p.lon));
-  const lonMax = Math.max(...pts.map((p) => p.lon));
-  const sumMin = Math.min(...pts.map((p) => p.Sumergencia!));
-  const sumMax = Math.max(...pts.map((p) => p.Sumergencia!));
+  // Evitar NaN/Infinity cuando no hay datos
+  const bounds = useMemo(() => {
+    if (pts.length === 0) {
+      return {
+        latMin: 0,
+        latMax: 1,
+        lonMin: 0,
+        lonMax: 1,
+        sumMin: 0,
+        sumMax: 1,
+      };
+    }
+    const latMin = Math.min(...pts.map((p) => p.lat));
+    const latMax = Math.max(...pts.map((p) => p.lat));
+    const lonMin = Math.min(...pts.map((p) => p.lon));
+    const lonMax = Math.max(...pts.map((p) => p.lon));
+    const sumMin = Math.min(...pts.map((p) => p.Sumergencia!));
+    const sumMax = Math.max(...pts.map((p) => p.Sumergencia!));
+    return { latMin, latMax, lonMin, lonMax, sumMin, sumMax };
+  }, [pts]);
 
   const project = (lat: number, lon: number, w: number, h: number) => {
+    const { lonMin, lonMax, latMin, latMax } = bounds;
     const x = ((lon - lonMin) / (lonMax - lonMin || 1)) * (w - 40) + 20;
     const y = h - ((lat - latMin) / (latMax - latMin || 1)) * (h - 40) - 20;
     return { x, y };
   };
 
   const sumColor = (s: number): string => {
+    const { sumMin, sumMax } = bounds;
     const t = (s - sumMin) / (sumMax - sumMin || 1);
     const r = Math.round(56 + t * 199);
     const g = Math.round(189 - t * 100);
@@ -40,7 +64,8 @@ export default function MapaSumergencia({ puntos, height = 500 }: MapaSumergenci
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || pts.length === 0) return;
+    if (!canvas) return;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
@@ -61,11 +86,14 @@ export default function MapaSumergencia({ puntos, height = 500 }: MapaSumergenci
       ctx.moveTo((W / 10) * i, 0);
       ctx.lineTo((W / 10) * i, H);
       ctx.stroke();
+
       ctx.beginPath();
       ctx.moveTo(0, (H / 10) * i);
       ctx.lineTo(W, (H / 10) * i);
       ctx.stroke();
     }
+
+    if (pts.length === 0) return;
 
     // Puntos con halo de calor
     pts.forEach((p) => {
@@ -86,11 +114,12 @@ export default function MapaSumergencia({ puntos, height = 500 }: MapaSumergenci
       ctx.arc(x, y, 3, 0, Math.PI * 2);
       ctx.fill();
     });
-  }, [pts, sumMin, sumMax]);
+  }, [pts, bounds, height]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || pts.length === 0) return;
+
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
@@ -103,7 +132,7 @@ export default function MapaSumergencia({ puntos, height = 500 }: MapaSumergenci
     });
 
     if (found) {
-      setTooltip({ x: e.clientX - rect.left, y: e.clientY - rect.top, punto: found });
+      setTooltip({ x: mx, y: my, punto: found });
     } else {
       setTooltip(null);
     }
@@ -120,6 +149,8 @@ export default function MapaSumergencia({ puntos, height = 500 }: MapaSumergenci
         onMouseMove={handleMouseMove}
         onMouseLeave={() => setTooltip(null)}
       />
+
+      {/* Tooltip */}
       {tooltip && (
         <div
           className="absolute z-10 bg-[#1e293b] border border-[#334155] rounded-lg p-3 text-xs shadow-xl pointer-events-none"
@@ -128,14 +159,25 @@ export default function MapaSumergencia({ puntos, height = 500 }: MapaSumergenci
           <p className="font-bold text-slate-200">{tooltip.punto.NO_key}</p>
           {tooltip.punto.nivel_5 && <p className="text-slate-400">Batería: {tooltip.punto.nivel_5}</p>}
           <p className="text-slate-400">Origen: {tooltip.punto.ORIGEN}</p>
-          <p className="text-sky-400 font-semibold">Sumergencia: {tooltip.punto.Sumergencia?.toFixed(1)} m</p>
+          <p className="text-sky-400 font-semibold">
+            Sumergencia: {tooltip.punto.Sumergencia?.toFixed(1)} m
+          </p>
           <p className="text-slate-400">Días: {tooltip.punto.Dias_desde_ultima?.toFixed(0)}</p>
           <p className="text-slate-500">{tooltip.punto.DT_plot_str}</p>
         </div>
       )}
-      {pts.length === 0 && (
+
+      {/* Estado sin datos */}
+      {!loading && pts.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
           Sin datos con coordenadas para mostrar.
+        </div>
+      )}
+
+      {/* Overlay loading */}
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg">
+          <div className="text-slate-200 text-sm font-semibold">Cargando mapa…</div>
         </div>
       )}
     </div>

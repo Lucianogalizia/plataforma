@@ -62,8 +62,6 @@ class GenerarTodosRequest(BaseModel):
 # ==========================================================
 # Estado global de la tarea en lote (simple, en memoria)
 # ==========================================================
-# En producción con múltiples workers esto debería ir a Redis o GCS.
-# Para un solo worker (Cloud Run con min-instances=1) alcanza.
 
 _batch_status: dict = {
     "corriendo":  False,
@@ -138,15 +136,6 @@ async def get_diagnostico_pozo(
     Devuelve el diagnóstico IA de un pozo.
     Si existe caché válido en GCS y regenerar=False, lo devuelve directo.
     Si regenerar=True o el caché está desactualizado, lo regenera en el momento.
-
-    Path params:
-        pozo: NO_key del pozo
-
-    Query params:
-        regenerar: bool (default False)
-
-    Returns:
-        dict con el diagnóstico completo o { "error": str }
     """
     no_key = normalize_no_exact(pozo)
     if not no_key:
@@ -154,13 +143,11 @@ async def get_diagnostico_pozo(
 
     din_ok, niv_ok = _load_din_niv_ok()
 
-    # --- Verificar caché ---
     cache = load_diag_from_gcs(no_key) if GCS_BUCKET else None
 
     if not regenerar and not necesita_regenerar(cache, din_ok, no_key):
         return cache
 
-    # --- Regenerar ---
     api_key = get_openai_key()
     if not api_key:
         raise HTTPException(
@@ -178,10 +165,7 @@ async def get_diagnostico_pozo(
     )
 
     if "error" in diag:
-        raise HTTPException(
-            status_code=500,
-            detail=diag["error"]
-        )
+        raise HTTPException(status_code=500, detail=diag["error"])
 
     return diag
 
@@ -195,12 +179,6 @@ async def post_generar_diagnostico(pozo: str):
     """
     Fuerza la regeneración del diagnóstico de un pozo,
     ignorando el caché existente.
-
-    Path params:
-        pozo: NO_key del pozo
-
-    Returns:
-        dict con el diagnóstico recién generado o { "error": str }
     """
     no_key = normalize_no_exact(pozo)
     if not no_key:
@@ -289,15 +267,6 @@ async def post_generar_todos(
 ):
     """
     Inicia la generación de diagnósticos en lote en background.
-    No bloquea — devuelve inmediatamente y la tarea corre en segundo plano.
-    Consultá /api/diagnosticos/estado-batch para ver el progreso.
-
-    Body (GenerarTodosRequest):
-        solo_pendientes: bool (default True) → saltea los ya actualizados
-        pozos: list[str] (opcional) → si None, procesa todos con DIN
-
-    Returns:
-        { "iniciado": bool, "total_a_procesar": int }
     """
     global _batch_status
 
@@ -349,22 +318,9 @@ async def post_generar_todos(
 async def get_estado_batch():
     """
     Devuelve el estado actual de la generación en lote.
-
-    Returns:
-        {
-            "corriendo":  bool,
-            "total":      int,
-            "procesados": int,
-            "pct":        float,
-            "ok":         int,
-            "error":      int,
-            "salteados":  int,
-            "eta_seg":    int | None,
-            "ultimo":     str | None,
-        }
     """
-    st  = _batch_status
-    tot = st.get("total", 0)
+    st   = _batch_status
+    tot  = st.get("total", 0)
     proc = st.get("procesados", 0)
 
     return {
@@ -382,60 +338,31 @@ async def get_estado_batch():
 
 # ==========================================================
 # GET /api/diagnosticos/tabla-global
+# FIX: devuelve "rows" en vez de "tabla" para que coincida con el frontend
 # ==========================================================
 
 @router.get("/tabla-global")
 async def get_tabla_global(
-    baterias:  Optional[str]  = Query(
-        None,
-        description="Baterías separadas por coma"
-    ),
-    severidad: Optional[str]  = Query(
-        None,
-        description="BAJA | MEDIA | ALTA | CRÍTICA | NINGUNA"
-    ),
-    solo_activas: bool = Query(
-        False,
-        description="Si True, devuelve solo mediciones con problemáticas ACTIVAS"
-    ),
+    baterias:     Optional[str]  = Query(None, description="Baterías separadas por coma"),
+    severidad:    Optional[str]  = Query(None, description="BAJA | MEDIA | ALTA | CRÍTICA | NINGUNA"),
+    solo_activas: bool           = Query(False, description="Si True, devuelve solo mediciones con problemáticas ACTIVAS"),
 ):
     """
     Devuelve la tabla global de diagnósticos con UNA FILA POR MEDICIÓN.
-    Si un pozo tiene 3 DINs analizados → 3 filas.
-
-    Query params:
-        baterias:     lista separada por coma (opcional)
-        severidad:    filtra por severidad máxima (opcional)
-        solo_activas: si True, solo mediciones con problemáticas ACTIVAS
-
-    Returns:
-        {
-            "total":  int,
-            "tabla":  [
-                {
-                    Pozo, Batería, Fecha DIN, Medición,
-                    Llenado %, Sumergencia, Caudal m³/d, %Balance,
-                    Sev. máx, Act., Res., Problemáticas,
-                    _prob_lista, Recomendación, Confianza, Generado
-                }
-            ],
-            "kpis":   { pozos_diagnosticados, mediciones_totales, criticos, ... }
-        }
     """
     din_ok, _ = _load_din_niv_ok()
     pozos     = _get_pozos_con_din(din_ok)
 
     if not pozos:
-        return {"total": 0, "tabla": [], "kpis": {}}
+        return {"total": 0, "rows": [], "kpis": {}}
 
-    # Cargar todos los diagnósticos del caché
     diags   = load_all_diags_from_gcs(pozos)
     bat_map = _get_bat_map()
 
     df = build_global_table(diags, bat_map, normalize_no_exact)
 
     if df.empty:
-        return {"total": 0, "tabla": [], "kpis": {}}
+        return {"total": 0, "rows": [], "kpis": {}}
 
     # --- Filtros ---
     if baterias:
@@ -451,49 +378,41 @@ async def get_tabla_global(
 
     kpis = get_kpis_global_table(df)
 
-    # Convertir a JSON-safe
     df = df.where(pd.notnull(df), None)
 
     return {
         "total": len(df),
-        "tabla": df.to_dict(orient="records"),
+        "rows":  df.to_dict(orient="records"),  # ← FIX: era "tabla"
         "kpis":  kpis,
     }
 
 
 # ==========================================================
 # GET /api/diagnosticos/estado-cache
+# FIX: devuelve las claves que espera el frontend
 # ==========================================================
 
 @router.get("/estado-cache")
 async def get_estado_cache_endpoint():
     """
     Devuelve el estado del caché de diagnósticos en GCS.
-    Indica cuántos pozos están listos y cuántos requieren regeneración.
-
-    Returns:
-        {
-            "total":      int,
-            "listos":     int,
-            "pendientes": int,
-            "pct_listo":  float,
-        }
     """
     din_ok, _ = _load_din_niv_ok()
     pozos     = _get_pozos_con_din(din_ok)
 
     if not pozos:
-        return {"total": 0, "listos": 0, "pendientes": 0, "pct_listo": 0.0}
+        return {
+            "total_pozos_con_din": 0,
+            "con_diagnostico":     0,
+            "pendientes":          0,
+        }
 
     estado = get_estado_cache(pozos, din_ok)
 
     return {
-        "total":      estado["total"],
-        "listos":     estado["listos"],
-        "pendientes": estado["pendientes"],
-        "pct_listo":  round(
-            estado["listos"] / estado["total"] * 100, 1
-        ) if estado["total"] > 0 else 0.0,
+        "total_pozos_con_din": estado["total"],       # ← FIX: era "total"
+        "con_diagnostico":     estado["listos"],       # ← FIX: era "listos"
+        "pendientes":          estado["pendientes"],
     }
 
 
@@ -505,15 +424,6 @@ async def get_estado_cache_endpoint():
 async def get_kpis_diagnosticos():
     """
     Devuelve los KPIs principales de la tabla global de diagnósticos.
-
-    Returns:
-        {
-            "pozos_diagnosticados": int,
-            "mediciones_totales":   int,
-            "criticos":             int,
-            "alta_severidad":       int,
-            "sin_problematicas":    int,
-        }
     """
     din_ok, _ = _load_din_niv_ok()
     pozos     = _get_pozos_con_din(din_ok)
@@ -542,13 +452,6 @@ async def get_kpis_diagnosticos():
 async def delete_diagnostico_pozo(pozo: str):
     """
     Elimina el diagnóstico cacheado de un pozo en GCS.
-    Útil para forzar regeneración limpia en la próxima consulta.
-
-    Path params:
-        pozo: NO_key del pozo
-
-    Returns:
-        { "ok": bool, "pozo": str }
     """
     no_key = normalize_no_exact(pozo)
     if not no_key:

@@ -309,31 +309,18 @@ def necesita_regenerar(
 ) -> bool:
     """
     Determina si el diagnóstico cacheado necesita regenerarse.
-
-    Regenera si:
-        - No existe diagnóstico (None)
-        - El diagnóstico tiene error
-        - El schema_version es anterior al actual
-        - Hay DINs más nuevos que la fecha de generación del diagnóstico
-
-    Args:
-        diag:   diagnóstico cacheado (puede ser None)
-        din_ok: DataFrame de índice DIN
-        no_key: identificador del pozo
-
-    Returns:
-        True si hay que regenerar, False si el caché es válido.
     """
+    # Si no hay diagnóstico o tiene error, hay que generarlo
     if not diag or "error" in diag:
         return True
 
     meta = diag.get("_meta", {})
-
-    # Schema desactualizado
+    
+    # Versión de esquema desactualizada
     if meta.get("schema_version", 0) < DIAG_SCHEMA_VERSION:
         return True
 
-    # Sin fecha de generación
+    # Fecha de generación inválida
     fecha_diag_str = meta.get("generado_utc")
     if not fecha_diag_str:
         return True
@@ -342,6 +329,10 @@ def necesita_regenerar(
         fecha_diag = pd.to_datetime(fecha_diag_str, utc=True)
     except Exception:
         return True
+
+    # --- SEGURO LÍNEA 171 (KeyError: 'NO_key') ---
+    if din_ok is None or "NO_key" not in din_ok.columns:
+        return True # Si no podemos validar, mejor regenerar
 
     # Comparar con el DIN más reciente
     din_p = din_ok[din_ok["NO_key"] == no_key].copy()
@@ -352,14 +343,15 @@ def necesita_regenerar(
     if not sort_cols:
         return False
 
-    latest_din = pd.to_datetime(
-        din_p[sort_cols[0]], errors="coerce", utc=True
-    ).max()
-
-    if pd.isna(latest_din):
-        return False
-
-    return latest_din > fecha_diag
+    try:
+        latest_din = pd.to_datetime(
+            din_p[sort_cols[0]], errors="coerce", utc=True
+        ).max()
+        if pd.isna(latest_din):
+            return False
+        return latest_din > fecha_diag
+    except:
+        return True
 
 
 # ==========================================================
@@ -672,16 +664,8 @@ def get_estado_cache(
     din_ok: pd.DataFrame,
 ) -> dict:
     """
-    Analiza el estado del caché de diagnósticos en GCS para
-    todos los pozos con DIN disponible.
-
-    Returns:
-        {
-            "total":      int,
-            "listos":     int,
-            "pendientes": int,
-            "diags":      dict { no_key: diag_dict }
-        }
+    Analiza el estado del caché de diagnósticos en GCS.
+    Blindado para que el endpoint /estado-cache no devuelva 500.
     """
     if not GCS_BUCKET:
         return {
@@ -691,15 +675,33 @@ def get_estado_cache(
             "diags":      {},
         }
 
-    diags_cache = load_all_diags_from_gcs(pozos)
-    pendientes  = sum(
-        1 for pk in pozos
-        if necesita_regenerar(diags_cache.get(pk), din_ok, pk)
-    )
+    try:
+        # Cargamos todos los diagnósticos
+        diags_cache = load_all_diags_from_gcs(pozos)
+        
+        # Calculamos pendientes con un try-except por cada pozo
+        pendientes = 0
+        for pk in pozos:
+            try:
+                if necesita_regenerar(diags_cache.get(pk), din_ok, pk):
+                    pendientes += 1
+            except:
+                # Si un pozo falla en la validación, lo contamos como pendiente
+                pendientes += 1
 
-    return {
-        "total":      len(pozos),
-        "listos":     len(diags_cache),
-        "pendientes": pendientes,
-        "diags":      diags_cache,
-    }
+        return {
+            "total":      len(pozos),
+            "listos":     len(diags_cache),
+            "pendientes": pendientes,
+            "diags":      diags_cache,
+        }
+    except Exception as e:
+        # Si todo falla, devolvemos un estado vacío en lugar de un Error 500
+        print(f"Error crítico en get_estado_cache: {e}")
+        return {
+            "total":      len(pozos),
+            "listos":     0,
+            "pendientes": len(pozos),
+            "diags":      {},
+            "error_log":  str(e)
+        }

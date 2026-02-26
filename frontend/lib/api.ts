@@ -297,6 +297,21 @@ export interface FilaDiagGlobal {
   "Generado": string;
 }
 
+export interface FilaValidacion {
+  validada: boolean;
+  pozo: string;
+  bateria: string;
+  fecha_medicion: string;
+  sumergencia_m: number | null;
+  base: string;
+  comentario: string;
+  usuario: string;
+  _no_key: string;
+  _fecha_key: string;
+  lat?: number | null;
+  lon?: number | null;
+  Dias_desde_ultima?: number | null;
+}
 // ==========================================================
 // DIN
 // ==========================================================
@@ -470,7 +485,10 @@ export const api = {
     if (params?.sum_max != null) qs.set("sum_max", String(params.sum_max));
     if (params?.dias_max != null) qs.set("dias_max", String(params.dias_max));
     if (params?.baterias) qs.set("baterias", params.baterias);
-    return apiGetCached<{ rows: unknown[] }>(`/api/validaciones/tabla?${qs}`);
+    return apiFetch<{        // ← apiFetch en vez de apiGetCached (no cachear)
+      total: number;
+      filas: FilaValidacion[];
+    }>(`/api/validaciones/tabla?${qs}`);
   },
 
   // ==========================================================

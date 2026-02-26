@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Providers from "./providers";
 
 export const metadata: Metadata = {
   title: "Plataforma DINA",
@@ -14,9 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es">
-      <body>
-        <Providers>{children}</Providers>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

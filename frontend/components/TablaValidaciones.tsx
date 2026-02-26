@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import api, { PuntoMapa } from "@/lib/api";
 
 interface TablaValidacionesProps {
-  pozos?: PuntoMapa[]; // ✅ ahora opcional
+  pozos: PuntoMapa[];
 }
 
 interface RowState {
@@ -50,7 +50,7 @@ function pozosToRows(pozos: PuntoMapa[]): RowState[] {
   }));
 }
 
-export default function TablaValidaciones({ pozos = [] }: TablaValidacionesProps) { // ✅ default []
+export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
   const [rows, setRows]     = useState<RowState[]>(() => pozosToRows(pozos));
   const [saving, setSaving] = useState<Record<number, boolean>>({});
   const [saved, setSaved]   = useState<Record<number, boolean>>({});

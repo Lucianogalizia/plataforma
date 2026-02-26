@@ -3,19 +3,23 @@
 #
 # Endpoints REST para diagnósticos IA
 #
+# IMPORTANTE: Las rutas estáticas (tabla-global, estado-cache, kpis,
+# estado-batch, generar-todos) DEBEN estar definidas ANTES que /{pozo}
+# para que FastAPI no las interprete como un parámetro de path.
+#
 # Rutas:
-#   GET  /api/diagnosticos/{pozo}           → diagnóstico de un pozo
-#   POST /api/diagnosticos/{pozo}/generar   → genera/regenera diagnóstico
-#   POST /api/diagnosticos/generar-todos    → genera diagnósticos en lote
 #   GET  /api/diagnosticos/tabla-global     → tabla global (una fila por medición)
 #   GET  /api/diagnosticos/estado-cache     → estado del caché GCS
+#   GET  /api/diagnosticos/estado-batch     → estado de generación en lote
 #   GET  /api/diagnosticos/kpis             → KPIs de la tabla global
+#   POST /api/diagnosticos/generar-todos    → genera diagnósticos en lote
+#   GET  /api/diagnosticos/{pozo}           → diagnóstico de un pozo
+#   POST /api/diagnosticos/{pozo}/generar   → genera/regenera diagnóstico
 #   DELETE /api/diagnosticos/{pozo}         → elimina el caché de un pozo
 # ==========================================================
 
 from __future__ import annotations
 
-import asyncio
 from typing import Optional
 
 import pandas as pd
@@ -54,13 +58,12 @@ router = APIRouter()
 # ==========================================================
 
 class GenerarTodosRequest(BaseModel):
-    """Cuerpo para generación en lote."""
     solo_pendientes: bool = True
-    pozos:           Optional[list[str]] = None  # None = todos los que tienen DIN
+    pozos: Optional[list[str]] = None
 
 
 # ==========================================================
-# Estado global de la tarea en lote (simple, en memoria)
+# Estado global de la tarea en lote
 # ==========================================================
 
 _batch_status: dict = {
@@ -80,12 +83,6 @@ _batch_status: dict = {
 # ==========================================================
 
 def _load_din_niv_ok():
-    """
-    Carga y prepara los índices DIN y NIV con keys y sin errores.
-
-    Returns:
-        (din_ok, niv_ok)
-    """
     df_din = load_din_index()
     df_niv = load_niv_index()
 
@@ -108,108 +105,151 @@ def _load_din_niv_ok():
 
 
 def _get_bat_map() -> dict:
-    """Construye el mapa pozo → batería desde el Excel de coordenadas."""
     coords = load_coords_repo()
     return build_bat_map(coords, normalize_no_exact)
 
 
 def _get_pozos_con_din(din_ok: pd.DataFrame) -> list[str]:
-    """Devuelve la lista de NO_key con archivos DIN disponibles."""
     if din_ok.empty or "NO_key" not in din_ok.columns:
         return []
     return sorted(din_ok["NO_key"].dropna().unique().tolist())
 
 
 # ==========================================================
-# GET /api/diagnosticos/{pozo}
+# *** RUTAS ESTÁTICAS PRIMERO ***
+# (deben ir ANTES de /{pozo} para que FastAPI no las capture)
 # ==========================================================
 
-@router.get("/{pozo}")
-async def get_diagnostico_pozo(
-    pozo:       str,
-    regenerar:  bool = Query(
-        False,
-        description="Si True, regenera aunque el caché sea válido"
-    ),
+# ----------------------------------------------------------
+# GET /api/diagnosticos/tabla-global
+# ----------------------------------------------------------
+
+@router.get("/tabla-global")
+async def get_tabla_global(
+    baterias:     Optional[str] = Query(None),
+    severidad:    Optional[str] = Query(None),
+    solo_activas: bool          = Query(False),
 ):
     """
-    Devuelve el diagnóstico IA de un pozo.
-    Si existe caché válido en GCS y regenerar=False, lo devuelve directo.
-    Si regenerar=True o el caché está desactualizado, lo regenera en el momento.
+    Tabla global de diagnósticos — una fila por medición.
+    Devuelve { total, rows, kpis }.
     """
-    no_key = normalize_no_exact(pozo)
-    if not no_key:
-        raise HTTPException(status_code=400, detail="Pozo inválido")
+    din_ok, _ = _load_din_niv_ok()
+    pozos     = _get_pozos_con_din(din_ok)
 
-    din_ok, niv_ok = _load_din_niv_ok()
+    if not pozos:
+        return {"total": 0, "rows": [], "kpis": {}}
 
-    cache = load_diag_from_gcs(no_key) if GCS_BUCKET else None
+    diags   = load_all_diags_from_gcs(pozos)
+    bat_map = _get_bat_map()
+    df      = build_global_table(diags, bat_map, normalize_no_exact)
 
-    if not regenerar and not necesita_regenerar(cache, din_ok, no_key):
-        return cache
+    if df.empty:
+        return {"total": 0, "rows": [], "kpis": {}}
 
-    api_key = get_openai_key()
-    if not api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="API key de OpenAI no configurada. "
-                   "Verificá GCP Secret Manager o variable OPENAI_API_KEY."
-        )
+    if baterias:
+        bat_list = [b.strip() for b in baterias.split(",") if b.strip()]
+        if bat_list and "Batería" in df.columns:
+            df = df[df["Batería"].isin(bat_list)]
 
-    diag = generar_diagnostico(
-        no_key=no_key,
-        din_ok=din_ok,
-        resolve_path_fn=resolve_existing_path,
-        api_key=api_key,
-        niv_ok=niv_ok,
-    )
+    if severidad and "Sev. máx" in df.columns:
+        df = df[df["Sev. máx"] == severidad.upper()]
 
-    if "error" in diag:
-        raise HTTPException(status_code=500, detail=diag["error"])
+    if solo_activas and "Act." in df.columns:
+        df = df[df["Act."] > 0]
 
-    return diag
+    kpis = get_kpis_global_table(df)
+    df   = df.where(pd.notnull(df), None)
+
+    return {
+        "total": len(df),
+        "rows":  df.to_dict(orient="records"),
+        "kpis":  kpis,
+    }
 
 
-# ==========================================================
-# POST /api/diagnosticos/{pozo}/generar
-# ==========================================================
+# ----------------------------------------------------------
+# GET /api/diagnosticos/estado-cache
+# ----------------------------------------------------------
 
-@router.post("/{pozo}/generar")
-async def post_generar_diagnostico(pozo: str):
+@router.get("/estado-cache")
+async def get_estado_cache_endpoint():
     """
-    Fuerza la regeneración del diagnóstico de un pozo,
-    ignorando el caché existente.
+    Estado del caché de diagnósticos en GCS.
+    Devuelve { total_pozos_con_din, con_diagnostico, pendientes }.
     """
-    no_key = normalize_no_exact(pozo)
-    if not no_key:
-        raise HTTPException(status_code=400, detail="Pozo inválido")
+    din_ok, _ = _load_din_niv_ok()
+    pozos     = _get_pozos_con_din(din_ok)
 
-    api_key = get_openai_key()
-    if not api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="API key de OpenAI no configurada."
-        )
+    if not pozos:
+        return {
+            "total_pozos_con_din": 0,
+            "con_diagnostico":     0,
+            "pendientes":          0,
+        }
 
-    din_ok, niv_ok = _load_din_niv_ok()
+    estado = get_estado_cache(pozos, din_ok)
 
-    diag = generar_diagnostico(
-        no_key=no_key,
-        din_ok=din_ok,
-        resolve_path_fn=resolve_existing_path,
-        api_key=api_key,
-        niv_ok=niv_ok,
-    )
-
-    if "error" in diag:
-        raise HTTPException(status_code=500, detail=diag["error"])
-
-    return diag
+    return {
+        "total_pozos_con_din": estado["total"],
+        "con_diagnostico":     estado["listos"],
+        "pendientes":          estado["pendientes"],
+    }
 
 
-# ==========================================================
+# ----------------------------------------------------------
+# GET /api/diagnosticos/estado-batch
+# ----------------------------------------------------------
+
+@router.get("/estado-batch")
+async def get_estado_batch():
+    """Estado actual de la generación en lote."""
+    st   = _batch_status
+    tot  = st.get("total", 0)
+    proc = st.get("procesados", 0)
+
+    return {
+        "corriendo":  st.get("corriendo", False),
+        "total":      tot,
+        "procesados": proc,
+        "pct":        round(proc / tot * 100, 1) if tot > 0 else 0.0,
+        "ok":         len(st.get("ok",        [])),
+        "error":      len(st.get("error",     [])),
+        "salteados":  len(st.get("salteados", [])),
+        "eta_seg":    st.get("eta_seg"),
+        "ultimo":     st.get("ultimo"),
+    }
+
+
+# ----------------------------------------------------------
+# GET /api/diagnosticos/kpis
+# ----------------------------------------------------------
+
+@router.get("/kpis")
+async def get_kpis_diagnosticos():
+    """KPIs principales de la tabla global."""
+    din_ok, _ = _load_din_niv_ok()
+    pozos     = _get_pozos_con_din(din_ok)
+
+    if not pozos:
+        return {
+            "pozos_diagnosticados": 0,
+            "mediciones_totales":   0,
+            "criticos":             0,
+            "alta_severidad":       0,
+            "sin_problematicas":    0,
+        }
+
+    diags   = load_all_diags_from_gcs(pozos)
+    bat_map = _get_bat_map()
+    df      = build_global_table(diags, bat_map, normalize_no_exact)
+
+    return get_kpis_global_table(df)
+
+
+# ----------------------------------------------------------
 # POST /api/diagnosticos/generar-todos
-# ==========================================================
+# ----------------------------------------------------------
 
 def _run_batch(
     pozos:           list[str],
@@ -218,10 +258,6 @@ def _run_batch(
     api_key:         str,
     solo_pendientes: bool,
 ):
-    """
-    Función que corre en background para la generación en lote.
-    Actualiza _batch_status durante la ejecución.
-    """
     global _batch_status
 
     _batch_status = {
@@ -265,39 +301,27 @@ async def post_generar_todos(
     body:             GenerarTodosRequest,
     background_tasks: BackgroundTasks,
 ):
-    """
-    Inicia la generación de diagnósticos en lote en background.
-    """
+    """Inicia la generación de diagnósticos en lote en background."""
     global _batch_status
 
     if _batch_status.get("corriendo"):
         raise HTTPException(
             status_code=409,
-            detail="Ya hay una generación en lote corriendo. "
-                   "Esperá a que termine antes de iniciar otra."
+            detail="Ya hay una generación en lote corriendo."
         )
 
     api_key = get_openai_key()
     if not api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="API key de OpenAI no configurada."
-        )
+        raise HTTPException(status_code=503, detail="API key de OpenAI no configurada.")
 
     din_ok, niv_ok = _load_din_niv_ok()
 
-    pozos = body.pozos
-    if not pozos:
-        pozos = _get_pozos_con_din(din_ok)
-
+    pozos = body.pozos or _get_pozos_con_din(din_ok)
     pozos = [normalize_no_exact(p) for p in pozos if p]
     pozos = [p for p in pozos if p]
 
     if not pozos:
-        raise HTTPException(
-            status_code=404,
-            detail="No hay pozos con DIN disponibles para diagnosticar."
-        )
+        raise HTTPException(status_code=404, detail="No hay pozos con DIN disponibles.")
 
     background_tasks.add_task(
         _run_batch,
@@ -308,167 +332,104 @@ async def post_generar_todos(
         solo_pendientes=body.solo_pendientes,
     )
 
-    return {
-        "iniciado":         True,
-        "total_a_procesar": len(pozos),
-    }
-
-
-@router.get("/estado-batch")
-async def get_estado_batch():
-    """
-    Devuelve el estado actual de la generación en lote.
-    """
-    st   = _batch_status
-    tot  = st.get("total", 0)
-    proc = st.get("procesados", 0)
-
-    return {
-        "corriendo":  st.get("corriendo", False),
-        "total":      tot,
-        "procesados": proc,
-        "pct":        round(proc / tot * 100, 1) if tot > 0 else 0.0,
-        "ok":         len(st.get("ok",        [])),
-        "error":      len(st.get("error",     [])),
-        "salteados":  len(st.get("salteados", [])),
-        "eta_seg":    st.get("eta_seg"),
-        "ultimo":     st.get("ultimo"),
-    }
+    return {"iniciado": True, "total_a_procesar": len(pozos)}
 
 
 # ==========================================================
-# GET /api/diagnosticos/tabla-global
-# FIX: devuelve "rows" en vez de "tabla" para que coincida con el frontend
+# *** RUTAS DINÁMICAS AL FINAL ***
+# /{pozo} debe ir DESPUÉS de todas las rutas estáticas
 # ==========================================================
 
-@router.get("/tabla-global")
-async def get_tabla_global(
-    baterias:     Optional[str]  = Query(None, description="Baterías separadas por coma"),
-    severidad:    Optional[str]  = Query(None, description="BAJA | MEDIA | ALTA | CRÍTICA | NINGUNA"),
-    solo_activas: bool           = Query(False, description="Si True, devuelve solo mediciones con problemáticas ACTIVAS"),
+# ----------------------------------------------------------
+# GET /api/diagnosticos/{pozo}
+# ----------------------------------------------------------
+
+@router.get("/{pozo}")
+async def get_diagnostico_pozo(
+    pozo:      str,
+    regenerar: bool = Query(False),
 ):
-    """
-    Devuelve la tabla global de diagnósticos con UNA FILA POR MEDICIÓN.
-    """
-    din_ok, _ = _load_din_niv_ok()
-    pozos     = _get_pozos_con_din(din_ok)
+    """Devuelve el diagnóstico IA de un pozo (desde caché o regenerado)."""
+    no_key = normalize_no_exact(pozo)
+    if not no_key:
+        raise HTTPException(status_code=400, detail="Pozo inválido")
 
-    if not pozos:
-        return {"total": 0, "rows": [], "kpis": {}}
+    din_ok, niv_ok = _load_din_niv_ok()
 
-    diags   = load_all_diags_from_gcs(pozos)
-    bat_map = _get_bat_map()
+    cache = load_diag_from_gcs(no_key) if GCS_BUCKET else None
 
-    df = build_global_table(diags, bat_map, normalize_no_exact)
+    if not regenerar and not necesita_regenerar(cache, din_ok, no_key):
+        return cache
 
-    if df.empty:
-        return {"total": 0, "rows": [], "kpis": {}}
+    api_key = get_openai_key()
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="API key de OpenAI no configurada."
+        )
 
-    # --- Filtros ---
-    if baterias:
-        bat_list = [b.strip() for b in baterias.split(",") if b.strip()]
-        if bat_list and "Batería" in df.columns:
-            df = df[df["Batería"].isin(bat_list)]
+    diag = generar_diagnostico(
+        no_key=no_key,
+        din_ok=din_ok,
+        resolve_path_fn=resolve_existing_path,
+        api_key=api_key,
+        niv_ok=niv_ok,
+    )
 
-    if severidad and "Sev. máx" in df.columns:
-        df = df[df["Sev. máx"] == severidad.upper()]
+    if "error" in diag:
+        raise HTTPException(status_code=500, detail=diag["error"])
 
-    if solo_activas and "Act." in df.columns:
-        df = df[df["Act."] > 0]
-
-    kpis = get_kpis_global_table(df)
-
-    df = df.where(pd.notnull(df), None)
-
-    return {
-        "total": len(df),
-        "rows":  df.to_dict(orient="records"),  # ← FIX: era "tabla"
-        "kpis":  kpis,
-    }
+    return diag
 
 
-# ==========================================================
-# GET /api/diagnosticos/estado-cache
-# FIX: devuelve las claves que espera el frontend
-# ==========================================================
+# ----------------------------------------------------------
+# POST /api/diagnosticos/{pozo}/generar
+# ----------------------------------------------------------
 
-@router.get("/estado-cache")
-async def get_estado_cache_endpoint():
-    """
-    Devuelve el estado del caché de diagnósticos en GCS.
-    """
-    din_ok, _ = _load_din_niv_ok()
-    pozos     = _get_pozos_con_din(din_ok)
+@router.post("/{pozo}/generar")
+async def post_generar_diagnostico(pozo: str):
+    """Fuerza la regeneración del diagnóstico de un pozo."""
+    no_key = normalize_no_exact(pozo)
+    if not no_key:
+        raise HTTPException(status_code=400, detail="Pozo inválido")
 
-    if not pozos:
-        return {
-            "total_pozos_con_din": 0,
-            "con_diagnostico":     0,
-            "pendientes":          0,
-        }
+    api_key = get_openai_key()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="API key de OpenAI no configurada.")
 
-    estado = get_estado_cache(pozos, din_ok)
+    din_ok, niv_ok = _load_din_niv_ok()
 
-    return {
-        "total_pozos_con_din": estado["total"],       # ← FIX: era "total"
-        "con_diagnostico":     estado["listos"],       # ← FIX: era "listos"
-        "pendientes":          estado["pendientes"],
-    }
+    diag = generar_diagnostico(
+        no_key=no_key,
+        din_ok=din_ok,
+        resolve_path_fn=resolve_existing_path,
+        api_key=api_key,
+        niv_ok=niv_ok,
+    )
 
+    if "error" in diag:
+        raise HTTPException(status_code=500, detail=diag["error"])
 
-# ==========================================================
-# GET /api/diagnosticos/kpis
-# ==========================================================
-
-@router.get("/kpis")
-async def get_kpis_diagnosticos():
-    """
-    Devuelve los KPIs principales de la tabla global de diagnósticos.
-    """
-    din_ok, _ = _load_din_niv_ok()
-    pozos     = _get_pozos_con_din(din_ok)
-
-    if not pozos:
-        return {
-            "pozos_diagnosticados": 0,
-            "mediciones_totales":   0,
-            "criticos":             0,
-            "alta_severidad":       0,
-            "sin_problematicas":    0,
-        }
-
-    diags   = load_all_diags_from_gcs(pozos)
-    bat_map = _get_bat_map()
-    df      = build_global_table(diags, bat_map, normalize_no_exact)
-
-    return get_kpis_global_table(df)
+    return diag
 
 
-# ==========================================================
+# ----------------------------------------------------------
 # DELETE /api/diagnosticos/{pozo}
-# ==========================================================
+# ----------------------------------------------------------
 
 @router.delete("/{pozo}")
 async def delete_diagnostico_pozo(pozo: str):
-    """
-    Elimina el diagnóstico cacheado de un pozo en GCS.
-    """
+    """Elimina el diagnóstico cacheado de un pozo en GCS."""
     no_key = normalize_no_exact(pozo)
     if not no_key:
         raise HTTPException(status_code=400, detail="Pozo inválido")
 
     if not GCS_BUCKET:
-        raise HTTPException(
-            status_code=503,
-            detail="GCS no configurado — no hay caché que eliminar."
-        )
+        raise HTTPException(status_code=503, detail="GCS no configurado.")
 
     client = get_gcs_client()
     if not client:
-        raise HTTPException(
-            status_code=503,
-            detail="No se pudo conectar a GCS."
-        )
+        raise HTTPException(status_code=503, detail="No se pudo conectar a GCS.")
 
     blob_name = f"diagnosticos/{no_key}/diagnostico.json"
     if GCS_PREFIX:
@@ -481,7 +442,4 @@ async def delete_diagnostico_pozo(pozo: str):
             blob.delete()
         return {"ok": True, "pozo": no_key}
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error eliminando diagnóstico: {e}"
-        )
+        raise HTTPException(status_code=500, detail=f"Error eliminando diagnóstico: {e}")

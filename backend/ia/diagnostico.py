@@ -141,17 +141,33 @@ def generar_diagnostico(
     no_key:          str,
     din_ok:          pd.DataFrame,
     resolve_path_fn,
-    api_key:          str,
+    api_key:         str,
     niv_ok:          pd.DataFrame | None = None,
 ) -> dict:
     """
     Genera el diagnóstico IA completo para un pozo.
+
+    Flujo:
+        1. Filtra los últimos 3 DINs del pozo
+        2. Parsea cada .din (local o GCS)
+        3. Extrae variables y shape de la carta CS
+        4. Si faltan niveles en el DIN, busca el NIV más cercano (≤90 días)
+        5. Construye el prompt y llama a OpenAI
+        6. Normaliza estados (ACTIVA/RESUELTA)
+        7. Agrega metadata (_meta)
+        8. Guarda en GCS si está configurado
+
+    Args:
+        no_key:          identificador normalizado del pozo
+        din_ok:          DataFrame de índice DIN (ya filtrado, con NO_key)
+        resolve_path_fn: función resolve_existing_path del módulo gcs
+        api_key:         API key de OpenAI
+        niv_ok:          DataFrame de índice NIV (opcional, para completar niveles)
+
+    Returns:
+        dict con el diagnóstico completo, o {"error": "..."} si falló.
     """
     # --- Filtrar DINs del pozo ---
-    # SEGURIDAD: Validamos la existencia de la columna antes de filtrar
-    if din_ok is None or "NO_key" not in din_ok.columns:
-        return {"error": "Estructura de datos inválida: columna 'NO_key' no encontrada en el índice DIN."}
-
     din_p = din_ok[din_ok["NO_key"] == no_key].copy()
     if din_p.empty or "path" not in din_p.columns:
         return {"error": "Sin archivos DIN disponibles para este pozo."}
@@ -200,65 +216,65 @@ def generar_diagnostico(
 
         # --- Completar sumergencia desde NIV si falta ---
         if vars_.get("Sumergencia_m") is None and niv_ok is not None and not niv_ok.empty:
-            if "NO_key" in niv_ok.columns:
-                niv_p = niv_ok[niv_ok["NO_key"] == no_key].copy()
-                if not niv_p.empty:
-                    try:
-                        fecha_din_dt = pd.to_datetime(str(fecha), errors="coerce")
-                        sort_niv = [c for c in ["niv_datetime", "mtime"] if c in niv_p.columns]
+            niv_p = niv_ok[niv_ok["NO_key"] == no_key].copy()
+            if not niv_p.empty:
+                try:
+                    fecha_din_dt = pd.to_datetime(str(fecha), errors="coerce")
+                except Exception:
+                    fecha_din_dt = pd.NaT
 
-                        if sort_niv and not pd.isna(fecha_din_dt):
-                            niv_p["_dt"] = pd.to_datetime(
-                                niv_p[sort_niv[0]], errors="coerce"
-                            )
-                            niv_p = niv_p.dropna(subset=["_dt"])
+                sort_niv = [c for c in ["niv_datetime", "mtime"] if c in niv_p.columns]
 
-                            if not niv_p.empty:
-                                niv_p["_diff"] = (niv_p["_dt"] - fecha_din_dt).abs()
-                                niv_p = niv_p.sort_values("_diff")
-                                mejor_niv = niv_p.iloc[0]
-                                diff_dias = (
-                                    mejor_niv["_diff"].days
-                                    if hasattr(mejor_niv["_diff"], "days")
-                                    else 999
-                                )
+                if sort_niv and not pd.isna(fecha_din_dt):
+                    niv_p["_dt"] = pd.to_datetime(
+                        niv_p[sort_niv[0]], errors="coerce"
+                    )
+                    niv_p = niv_p.dropna(subset=["_dt"])
 
-                                if diff_dias <= 90:
-                                    def sf(v):
-                                        try:
-                                            return float(str(v).replace(",", "."))
-                                        except Exception:
-                                            return None
+                    if not niv_p.empty:
+                        niv_p["_diff"] = (niv_p["_dt"] - fecha_din_dt).abs()
+                        niv_p = niv_p.sort_values("_diff")
+                        mejor_niv = niv_p.iloc[0]
+                        diff_dias = (
+                            mejor_niv["_diff"].days
+                            if hasattr(mejor_niv["_diff"], "days")
+                            else 999
+                        )
 
-                                    pb_niv = sf(mejor_niv.get("PB"))
-                                    nc_niv = sf(mejor_niv.get("NC"))
-                                    nm_niv = sf(mejor_niv.get("NM"))
-                                    nd_niv = sf(mejor_niv.get("ND"))
+                        if diff_dias <= 90:
+                            def sf(v):
+                                try:
+                                    return float(str(v).replace(",", "."))
+                                except Exception:
+                                    return None
 
-                                    pb = vars_.get("Prof_bomba_m") or pb_niv
-                                    if pb is not None:
-                                        for nivel_val, nivel_nom in [
-                                            (nc_niv, "NC"),
-                                            (nm_niv, "NM"),
-                                            (nd_niv, "ND"),
-                                        ]:
-                                            if nivel_val is not None:
-                                                vars_["Sumergencia_m"]    = round(pb - nivel_val, 1)
-                                                vars_["Base_sumergencia"] = nivel_nom
-                                                vars_["Prof_bomba_m"]     = (
-                                                    vars_.get("Prof_bomba_m") or pb
-                                                )
-                                                if vars_.get("NC_m") is None:
-                                                    vars_["NC_m"] = nc_niv
-                                                if vars_.get("NM_m") is None:
-                                                    vars_["NM_m"] = nm_niv
-                                                if vars_.get("ND_m") is None:
-                                                    vars_["ND_m"] = nd_niv
-                                                if vars_.get("PB_m") is None:
-                                                    vars_["PB_m"] = pb_niv
-                                                break
-                    except Exception:
-                        pass
+                            pb_niv = sf(mejor_niv.get("PB"))
+                            nc_niv = sf(mejor_niv.get("NC"))
+                            nm_niv = sf(mejor_niv.get("NM"))
+                            nd_niv = sf(mejor_niv.get("ND"))
+
+                            pb = vars_.get("Prof_bomba_m") or pb_niv
+                            if pb is not None:
+                                for nivel_val, nivel_nom in [
+                                    (nc_niv, "NC"),
+                                    (nm_niv, "NM"),
+                                    (nd_niv, "ND"),
+                                ]:
+                                    if nivel_val is not None:
+                                        vars_["Sumergencia_m"]    = round(pb - nivel_val, 1)
+                                        vars_["Base_sumergencia"] = nivel_nom
+                                        vars_["Prof_bomba_m"]     = (
+                                            vars_.get("Prof_bomba_m") or pb
+                                        )
+                                        if vars_.get("NC_m") is None:
+                                            vars_["NC_m"] = nc_niv
+                                        if vars_.get("NM_m") is None:
+                                            vars_["NM_m"] = nm_niv
+                                        if vars_.get("ND_m") is None:
+                                            vars_["ND_m"] = nd_niv
+                                        if vars_.get("PB_m") is None:
+                                            vars_["PB_m"] = pb_niv
+                                        break
 
         mediciones.append({
             "fecha":    str(fecha),
@@ -298,6 +314,7 @@ def generar_diagnostico(
 
     return diag
 
+
 # ==========================================================
 # Verificación de necesidad de regeneración
 # ==========================================================
@@ -309,18 +326,31 @@ def necesita_regenerar(
 ) -> bool:
     """
     Determina si el diagnóstico cacheado necesita regenerarse.
+
+    Regenera si:
+        - No existe diagnóstico (None)
+        - El diagnóstico tiene error
+        - El schema_version es anterior al actual
+        - Hay DINs más nuevos que la fecha de generación del diagnóstico
+
+    Args:
+        diag:   diagnóstico cacheado (puede ser None)
+        din_ok: DataFrame de índice DIN
+        no_key: identificador del pozo
+
+    Returns:
+        True si hay que regenerar, False si el caché es válido.
     """
-    # Si no hay diagnóstico o tiene error, hay que generarlo
     if not diag or "error" in diag:
         return True
 
     meta = diag.get("_meta", {})
-    
-    # Versión de esquema desactualizada
+
+    # Schema desactualizado
     if meta.get("schema_version", 0) < DIAG_SCHEMA_VERSION:
         return True
 
-    # Fecha de generación inválida
+    # Sin fecha de generación
     fecha_diag_str = meta.get("generado_utc")
     if not fecha_diag_str:
         return True
@@ -329,10 +359,6 @@ def necesita_regenerar(
         fecha_diag = pd.to_datetime(fecha_diag_str, utc=True)
     except Exception:
         return True
-
-    # --- SEGURO LÍNEA 171 (KeyError: 'NO_key') ---
-    if din_ok is None or "NO_key" not in din_ok.columns:
-        return True # Si no podemos validar, mejor regenerar
 
     # Comparar con el DIN más reciente
     din_p = din_ok[din_ok["NO_key"] == no_key].copy()
@@ -343,15 +369,14 @@ def necesita_regenerar(
     if not sort_cols:
         return False
 
-    try:
-        latest_din = pd.to_datetime(
-            din_p[sort_cols[0]], errors="coerce", utc=True
-        ).max()
-        if pd.isna(latest_din):
-            return False
-        return latest_din > fecha_diag
-    except:
-        return True
+    latest_din = pd.to_datetime(
+        din_p[sort_cols[0]], errors="coerce", utc=True
+    ).max()
+
+    if pd.isna(latest_din):
+        return False
+
+    return latest_din > fecha_diag
 
 
 # ==========================================================
@@ -445,147 +470,172 @@ def generar_todos(
 # Construcción de tabla global (una fila por medición)
 # ==========================================================
 
-# ==========================================================
-# Construcción de tabla global (VERSIÓN FINAL PROTEGIDA)
-# ==========================================================
-
 def build_global_table(
     diags:          dict[str, dict],
-    bat_map:         dict[str, str],
+    bat_map:        dict[str, str],
     normalize_no_fn,
 ) -> pd.DataFrame:
     """
-    Construye la tabla global. 
-    Asegura compatibilidad entre nombres reales de GCS y nombres normalizados de la tabla.
+    Construye la tabla global de diagnósticos con UNA FILA POR MEDICIÓN.
+    Si un pozo tiene 3 DINs analizados → 3 filas en la tabla.
+
+    Incluye compatibilidad con JSONs viejos sin campo "mediciones".
+
+    Args:
+        diags:           dict { no_key: diag_dict } cargado desde GCS
+        bat_map:         dict { no_key_normalizado: bateria }
+        normalize_no_fn: función para normalizar NO_key
+
+    Returns:
+        DataFrame ordenado por severidad → batería → pozo → fecha,
+        con columnas:
+            Pozo, Batería, Fecha DIN, Medición,
+            Llenado %, Sumergencia, Caudal m³/d, %Balance,
+            Sev. máx, Act., Res., Problemáticas,
+            _prob_lista, Recomendación, Confianza, Generado
     """
     rows = []
 
-    for real_no_key, diag in diags.items():
-        try:
-            if not isinstance(diag, dict):
-                continue
-            
-            # --- CLAVE: Intentamos normalizar el nombre para buscarlo en el bat_map ---
-            try:
-                norm_key = normalize_no_fn(str(real_no_key))
-            except:
-                norm_key = str(real_no_key)
+    for no_key, diag in diags.items():
+        bateria       = bat_map.get(normalize_no_fn(no_key), "N/D")
+        meta          = diag.get("_meta", {})
+        fecha_gen     = meta.get("generado_utc", "?")[:19].replace("T", " ")
+        confianza     = diag.get("confianza", "?")
+        recomendacion = diag.get("recomendacion", "")
 
-            bateria       = bat_map.get(norm_key, "N/D")
-            meta          = diag.get("_meta", {})
-            fecha_gen     = str(meta.get("generado_utc", "?"))[:19].replace("T", " ")
-            confianza     = diag.get("confianza", "?")
-            recomendacion = diag.get("recomendacion", "")
+        mediciones_list = diag.get("mediciones", [])
 
-            mediciones_list = diag.get("mediciones", [])
+        # --- Compatibilidad con JSONs viejos sin "mediciones" ---
+        if not mediciones_list:
+            probs_viejas    = diag.get("problematicas", [])
+            mediciones_list = [{
+                "fecha":             meta.get("fecha_din_mas_reciente", "?"),
+                "label":             "Única medición",
+                "llenado_pct":       None,
+                "sumergencia_m":     None,
+                "sumergencia_nivel": "N/D",
+                "caudal_bruto":      None,
+                "pct_balance":       None,
+                "problemáticas":     probs_viejas,
+            }]
 
-            if not mediciones_list:
-                probs_viejas    = diag.get("problematicas", [])
-                mediciones_list = [{
-                    "fecha":             meta.get("fecha_din_mas_reciente", "?"),
-                    "label":             "Única medición",
-                    "llenado_pct":       None,
-                    "sumergencia_m":     None,
-                    "sumergencia_nivel": "N/D",
-                    "caudal_bruto":      None,
-                    "pct_balance":       None,
-                    "problemáticas":     probs_viejas,
-                }]
+        for med in mediciones_list:
+            fecha     = med.get("fecha",             "?")
+            label     = med.get("label",             "")
+            llenado   = med.get("llenado_pct")
+            sumer     = med.get("sumergencia_m")
+            sumer_niv = med.get("sumergencia_nivel", "N/D")
+            caudal    = med.get("caudal_bruto")
+            balance   = med.get("pct_balance")
+            probs     = med.get("problemáticas",     [])
 
-            for med in mediciones_list:
-                fecha     = med.get("fecha",             "?")
-                label     = med.get("label",             "")
-                llenado   = med.get("llenado_pct")
-                sumer     = med.get("sumergencia_m")
-                sumer_niv = med.get("sumergencia_nivel", "N/D")
-                caudal    = med.get("caudal_bruto")
-                balance   = med.get("pct_balance")
-                probs     = med.get("problemáticas",     [])
+            # Ordenar: ACTIVAS primero, luego por severidad
+            probs_sorted = sorted(
+                probs,
+                key=lambda x: (
+                    0 if x.get("estado") == "ACTIVA" else 1,
+                    SEVERIDAD_ORDEN.get(x.get("severidad", "BAJA"), 9),
+                ),
+            )
 
-                try:
-                    probs_sorted = sorted(
-                        probs,
-                        key=lambda x: (
-                            0 if x.get("estado") == "ACTIVA" else 1,
-                            SEVERIDAD_ORDEN.get(x.get("severidad", "BAJA"), 9),
-                        ),
+            if probs_sorted:
+                lineas = []
+                for p in probs_sorted:
+                    sev     = p.get("severidad", "BAJA")
+                    estado  = p.get("estado",    "ACTIVA")
+                    emoji_s = SEVERIDAD_EMOJI.get(sev,    "⚪")
+                    emoji_e = ESTADO_EMOJI.get(estado,    "")
+                    lineas.append(
+                        f"{emoji_e}{emoji_s} {p.get('nombre','?')} [{sev}]"
                     )
-                except:
-                    probs_sorted = probs
+                prob_texto = "\n".join(lineas)
+                prob_lista = [p.get("nombre", "?") for p in probs_sorted]
 
-                if probs_sorted:
-                    lineas = []
-                    for p in probs_sorted:
-                        sev     = p.get("severidad", "BAJA")
-                        estado  = p.get("estado",    "ACTIVA")
-                        emoji_s = SEVERIDAD_EMOJI.get(sev,    "⚪")
-                        emoji_e = ESTADO_EMOJI.get(estado,    "")
-                        lineas.append(f"{emoji_e}{emoji_s} {p.get('nombre','?')} [{sev}]")
-                    prob_texto = "\n".join(lineas)
-                    prob_lista = [p.get("nombre", "?") for p in probs_sorted]
-                    activas = [p for p in probs_sorted if p.get("estado") == "ACTIVA"]
-                    
-                    try:
-                        sev_max = min(activas, key=lambda x: SEVERIDAD_ORDEN.get(x.get("severidad", "BAJA"), 9)).get("severidad", "BAJA") if activas else "RESUELTA"
-                    except:
-                        sev_max = "BAJA"
+                activas = [
+                    p for p in probs_sorted if p.get("estado") == "ACTIVA"
+                ]
+                sev_max = (
+                    min(
+                        activas,
+                        key=lambda x: SEVERIDAD_ORDEN.get(
+                            x.get("severidad", "BAJA"), 9
+                        ),
+                    ).get("severidad", "BAJA")
+                    if activas
+                    else "RESUELTA"
+                )
+                n_activas   = len(activas)
+                n_resueltas = len(probs_sorted) - n_activas
 
-                    n_activas   = len(activas)
-                    n_resueltas = len(probs_sorted) - n_activas
-                else:
-                    prob_texto, prob_lista, sev_max, n_activas, n_resueltas = "✅ Sin problemáticas", [], "NINGUNA", 0, 0
+            else:
+                prob_texto  = "✅ Sin problemáticas"
+                prob_lista  = []
+                sev_max     = "NINGUNA"
+                n_activas   = 0
+                n_resueltas = 0
 
-                rows.append({
-                    "Pozo":          str(real_no_key), # Mostramos el nombre real para que coincida con la carpeta
-                    "Batería":        str(bateria),
-                    "Fecha DIN":     str(fecha),
-                    "Medición":      str(label),
-                    "Llenado %":     f"{llenado}%" if llenado is not None else "N/D",
-                    "Sumergencia":   f"{sumer} m ({sumer_niv})" if sumer is not None else "N/D",
-                    "Caudal m³/d":   caudal if caudal is not None else "N/D",
-                    "%Balance":      f"{balance}%" if balance is not None else "N/D",
-                    "Sev. máx":      str(sev_max),
-                    "Act.":          int(n_activas),
-                    "Res.":          int(n_resueltas),
-                    "Problemáticas": str(prob_texto),
-                    "_prob_lista":   prob_lista,
-                    "Recomendación": str(recomendacion),
-                    "Confianza":     str(confianza),
-                    "Generado":      str(fecha_gen),
-                })
-        except Exception as e:
-            print(f"Error procesando pozo {real_no_key}: {e}")
-            continue
+            rows.append({
+                "Pozo":          no_key,
+                "Batería":       bateria,
+                "Fecha DIN":     fecha,
+                "Medición":      label,
+                "Llenado %":     f"{llenado}%" if llenado is not None else "N/D",
+                "Sumergencia":   (
+                    f"{sumer} m ({sumer_niv})"
+                    if sumer is not None
+                    else "N/D"
+                ),
+                "Caudal m³/d":   caudal if caudal is not None else "N/D",
+                "%Balance":      f"{balance}%" if balance is not None else "N/D",
+                "Sev. máx":      sev_max,
+                "Act.":          n_activas,
+                "Res.":          n_resueltas,
+                "Problemáticas": prob_texto,
+                "_prob_lista":   prob_lista,
+                "Recomendación": recomendacion,
+                "Confianza":     confianza,
+                "Generado":      fecha_gen,
+            })
 
     df = pd.DataFrame(rows)
     if df.empty:
         return df
 
-    # LIMPIEZA CRÍTICA: Convertir NaNs a None para evitar Error 500 en la respuesta JSON
-    df = df.replace([float('inf'), float('-inf')], None)
-    df = df.where(pd.notnull(df), None)
-
-    sev_ord_ext = {"CRÍTICA": 0, "ALTA": 1, "MEDIA": 2, "BAJA": 3, "RESUELTA": 4, "NINGUNA": 5}
-    if "Sev. máx" in df.columns:
-        df["_sev_ord"] = df["Sev. máx"].map(sev_ord_ext).fillna(9)
-        sort_cols = [c for c in ["_sev_ord", "Batería", "Pozo", "Fecha DIN"] if c in df.columns]
-        df = df.sort_values(sort_cols).drop(columns=["_sev_ord"], errors="ignore")
+    # Ordenar por severidad → batería → pozo → fecha
+    sev_ord_ext = {
+        "CRÍTICA":  0,
+        "ALTA":     1,
+        "MEDIA":    2,
+        "BAJA":     3,
+        "RESUELTA": 4,
+        "NINGUNA":  5,
+    }
+    df["_sev_ord"] = df["Sev. máx"].map(sev_ord_ext).fillna(9)
+    df = df.sort_values(
+        ["_sev_ord", "Batería", "Pozo", "Fecha DIN"]
+    ).drop(columns=["_sev_ord"])
 
     return df.reset_index(drop=True)
 
 
 # ==========================================================
-# ==========================================================
-# KPIs de la tabla global (VERSIÓN PROTEGIDA)
+# KPIs de la tabla global
 # ==========================================================
 
 def get_kpis_global_table(df: pd.DataFrame) -> dict:
     """
     Calcula los KPIs de la tabla global de diagnósticos.
-    Blindado contra errores de columnas faltantes o datos corruptos.
+
+    Returns:
+        {
+            "pozos_diagnosticados": int,
+            "mediciones_totales":   int,
+            "criticos":             int,
+            "alta_severidad":       int,
+            "sin_problematicas":    int,
+        }
     """
-    # 1. Caso base: DataFrame nulo o vacío
-    if df is None or df.empty:
+    if df.empty:
         return {
             "pozos_diagnosticados": 0,
             "mediciones_totales":   0,
@@ -594,23 +644,18 @@ def get_kpis_global_table(df: pd.DataFrame) -> dict:
             "sin_problematicas":    0,
         }
 
-    # 2. Función interna para contar de forma segura
-    # Evita que el programa explote si no encuentra la columna "Pozo" o "Sev. máx"
-    def safe_count(condition):
-        try:
-            if "Pozo" in df.columns and "Sev. máx" in df.columns:
-                return int(df[condition]["Pozo"].nunique())
-            return 0
-        except Exception:
-            return 0
-
-    # 3. Retorno con validaciones de existencia de columnas
     return {
-        "pozos_diagnosticados": int(df["Pozo"].nunique()) if "Pozo" in df.columns else 0,
+        "pozos_diagnosticados": int(df["Pozo"].nunique()),
         "mediciones_totales":   len(df),
-        "criticos":             safe_count(df["Sev. máx"] == "CRÍTICA"),
-        "alta_severidad":       safe_count(df["Sev. máx"] == "ALTA"),
-        "sin_problematicas":    safe_count(df["Sev. máx"] == "NINGUNA"),
+        "criticos":             int(
+            df[df["Sev. máx"] == "CRÍTICA"]["Pozo"].nunique()
+        ),
+        "alta_severidad":       int(
+            df[df["Sev. máx"] == "ALTA"]["Pozo"].nunique()
+        ),
+        "sin_problematicas":    int(
+            df[df["Sev. máx"] == "NINGUNA"]["Pozo"].nunique()
+        ),
     }
 
 
@@ -620,28 +665,27 @@ def get_kpis_global_table(df: pd.DataFrame) -> dict:
 
 def build_bat_map(coords_df: pd.DataFrame, normalize_no_fn) -> dict[str, str]:
     """
-    Construye el mapa { no_key_normalizado: bateria } desde el repo.
-    Blindado contra errores de normalización.
+    Construye el mapa { no_key_normalizado: bateria } desde el
+    DataFrame de coordenadas.
+
+    Args:
+        coords_df:       DataFrame con columnas nombre_corto y nivel_5
+        normalize_no_fn: función para normalizar NO_key
+
+    Returns:
+        dict { no_key: bateria_str }
     """
     bat_map: dict[str, str] = {}
 
-    if coords_df is None or coords_df.empty:
+    if coords_df.empty:
         return bat_map
 
     if "nombre_corto" not in coords_df.columns or "nivel_5" not in coords_df.columns:
         return bat_map
 
     for _, row in coords_df.iterrows():
-        try:
-            # Intentamos normalizar; si falla (por caracteres raros), usamos el nombre original
-            nombre_raw = str(row["nombre_corto"])
-            try:
-                k = normalize_no_fn(nombre_raw)
-            except:
-                k = nombre_raw
-            bat_map[k] = str(row["nivel_5"])
-        except:
-            continue
+        k = normalize_no_fn(str(row["nombre_corto"]))
+        bat_map[k] = str(row["nivel_5"])
 
     return bat_map
 
@@ -655,8 +699,16 @@ def get_estado_cache(
     din_ok: pd.DataFrame,
 ) -> dict:
     """
-    Analiza el estado del caché de diagnósticos en GCS.
-    Blindado para que el endpoint /estado-cache no devuelva 500.
+    Analiza el estado del caché de diagnósticos en GCS para
+    todos los pozos con DIN disponible.
+
+    Returns:
+        {
+            "total":      int,
+            "listos":     int,
+            "pendientes": int,
+            "diags":      dict { no_key: diag_dict }
+        }
     """
     if not GCS_BUCKET:
         return {
@@ -666,33 +718,15 @@ def get_estado_cache(
             "diags":      {},
         }
 
-    try:
-        # Cargamos todos los diagnósticos
-        diags_cache = load_all_diags_from_gcs(pozos)
-        
-        # Calculamos pendientes con un try-except por cada pozo
-        pendientes = 0
-        for pk in pozos:
-            try:
-                if necesita_regenerar(diags_cache.get(pk), din_ok, pk):
-                    pendientes += 1
-            except:
-                # Si un pozo falla en la validación, lo contamos como pendiente
-                pendientes += 1
+    diags_cache = load_all_diags_from_gcs(pozos)
+    pendientes  = sum(
+        1 for pk in pozos
+        if necesita_regenerar(diags_cache.get(pk), din_ok, pk)
+    )
 
-        return {
-            "total":      len(pozos),
-            "listos":     len(diags_cache),
-            "pendientes": pendientes,
-            "diags":      diags_cache,
-        }
-    except Exception as e:
-        # Si todo falla, devolvemos un estado vacío en lugar de un Error 500
-        print(f"Error crítico en get_estado_cache: {e}")
-        return {
-            "total":      len(pozos),
-            "listos":     0,
-            "pendientes": len(pozos),
-            "diags":      {},
-            "error_log":  str(e)
-        }
+    return {
+        "total":      len(pozos),
+        "listos":     len(diags_cache),
+        "pendientes": pendientes,
+        "diags":      diags_cache,
+    }

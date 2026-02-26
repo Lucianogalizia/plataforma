@@ -455,25 +455,21 @@ def build_global_table(
     normalize_no_fn,
 ) -> pd.DataFrame:
     """
-    Construye la tabla global de diagnósticos con UNA FILA POR MEDICIÓN.
-    Si un pozo tiene 3 DINs analizados → 3 filas en la tabla.
-
-    Incluye compatibilidad con JSONs viejos y limpieza de valores NaN/Inf.
+    Construye la tabla global. 
+    Asegura compatibilidad entre nombres reales de GCS y nombres normalizados de la tabla.
     """
     rows = []
 
-    # Iteramos por cada pozo recuperado de GCS
-    for no_key, diag in diags.items():
+    for real_no_key, diag in diags.items():
         try:
-            # --- SEGURO 1: Ignorar si el diagnóstico no es un diccionario válido ---
-            if not isinstance(diag, dict) or not no_key:
+            if not isinstance(diag, dict):
                 continue
-
-            # --- SEGURO 2: Normalización segura del nombre del pozo ---
+            
+            # --- CLAVE: Intentamos normalizar el nombre para buscarlo en el bat_map ---
             try:
-                norm_key = normalize_no_fn(str(no_key))
+                norm_key = normalize_no_fn(str(real_no_key))
             except:
-                norm_key = str(no_key)
+                norm_key = str(real_no_key)
 
             bateria       = bat_map.get(norm_key, "N/D")
             meta          = diag.get("_meta", {})
@@ -483,7 +479,6 @@ def build_global_table(
 
             mediciones_list = diag.get("mediciones", [])
 
-            # --- Compatibilidad con JSONs viejos sin "mediciones" ---
             if not mediciones_list:
                 probs_viejas    = diag.get("problematicas", [])
                 mediciones_list = [{
@@ -498,7 +493,6 @@ def build_global_table(
                 }]
 
             for med in mediciones_list:
-                # --- SEGURO 3: Extracción segura de datos con .get() ---
                 fecha     = med.get("fecha",             "?")
                 label     = med.get("label",             "")
                 llenado   = med.get("llenado_pct")
@@ -508,7 +502,6 @@ def build_global_table(
                 balance   = med.get("pct_balance")
                 probs     = med.get("problemáticas",     [])
 
-                # Ordenar problemáticas por severidad
                 try:
                     probs_sorted = sorted(
                         probs,
@@ -527,19 +520,13 @@ def build_global_table(
                         estado  = p.get("estado",    "ACTIVA")
                         emoji_s = SEVERIDAD_EMOJI.get(sev,    "⚪")
                         emoji_e = ESTADO_EMOJI.get(estado,    "")
-                        lineas.append(
-                            f"{emoji_e}{emoji_s} {p.get('nombre','?')} [{sev}]"
-                        )
+                        lineas.append(f"{emoji_e}{emoji_s} {p.get('nombre','?')} [{sev}]")
                     prob_texto = "\n".join(lineas)
                     prob_lista = [p.get("nombre", "?") for p in probs_sorted]
-
                     activas = [p for p in probs_sorted if p.get("estado") == "ACTIVA"]
                     
                     try:
-                        sev_max = min(
-                            activas,
-                            key=lambda x: SEVERIDAD_ORDEN.get(x.get("severidad", "BAJA"), 9)
-                        ).get("severidad", "BAJA") if activas else "RESUELTA"
+                        sev_max = min(activas, key=lambda x: SEVERIDAD_ORDEN.get(x.get("severidad", "BAJA"), 9)).get("severidad", "BAJA") if activas else "RESUELTA"
                     except:
                         sev_max = "BAJA"
 
@@ -548,9 +535,8 @@ def build_global_table(
                 else:
                     prob_texto, prob_lista, sev_max, n_activas, n_resueltas = "✅ Sin problemáticas", [], "NINGUNA", 0, 0
 
-                # Construcción de la fila con tipos nativos
                 rows.append({
-                    "Pozo":          str(no_key),
+                    "Pozo":          str(real_no_key), # Mostramos el nombre real para que coincida con la carpeta
                     "Batería":        str(bateria),
                     "Fecha DIN":     str(fecha),
                     "Medición":      str(label),
@@ -568,24 +554,18 @@ def build_global_table(
                     "Generado":      str(fecha_gen),
                 })
         except Exception as e:
-            # --- SEGURO 4: Si un pozo falla, lo saltamos para no matar la tabla completa ---
-            print(f"Error procesando pozo {no_key} en build_global_table: {e}")
+            print(f"Error procesando pozo {real_no_key}: {e}")
             continue
 
     df = pd.DataFrame(rows)
     if df.empty:
         return df
 
-    # --- SEGURO 5: LIMPIEZA CRÍTICA PARA SERIALIZACIÓN JSON ---
-    # Reemplaza NaN por None (null en JSON) e Infinitos por None para evitar Error 500
+    # LIMPIEZA CRÍTICA: Convertir NaNs a None para evitar Error 500 en la respuesta JSON
     df = df.replace([float('inf'), float('-inf')], None)
     df = df.where(pd.notnull(df), None)
 
-    # Ordenar por severidad → batería → pozo → fecha
-    sev_ord_ext = {
-        "CRÍTICA":  0, "ALTA": 1, "MEDIA": 2, "BAJA": 3, "RESUELTA": 4, "NINGUNA": 5
-    }
-    
+    sev_ord_ext = {"CRÍTICA": 0, "ALTA": 1, "MEDIA": 2, "BAJA": 3, "RESUELTA": 4, "NINGUNA": 5}
     if "Sev. máx" in df.columns:
         df["_sev_ord"] = df["Sev. máx"].map(sev_ord_ext).fillna(9)
         sort_cols = [c for c in ["_sev_ord", "Batería", "Pozo", "Fecha DIN"] if c in df.columns]
@@ -640,27 +620,28 @@ def get_kpis_global_table(df: pd.DataFrame) -> dict:
 
 def build_bat_map(coords_df: pd.DataFrame, normalize_no_fn) -> dict[str, str]:
     """
-    Construye el mapa { no_key_normalizado: bateria } desde el
-    DataFrame de coordenadas.
-
-    Args:
-        coords_df:       DataFrame con columnas nombre_corto y nivel_5
-        normalize_no_fn: función para normalizar NO_key
-
-    Returns:
-        dict { no_key: bateria_str }
+    Construye el mapa { no_key_normalizado: bateria } desde el repo.
+    Blindado contra errores de normalización.
     """
     bat_map: dict[str, str] = {}
 
-    if coords_df.empty:
+    if coords_df is None or coords_df.empty:
         return bat_map
 
     if "nombre_corto" not in coords_df.columns or "nivel_5" not in coords_df.columns:
         return bat_map
 
     for _, row in coords_df.iterrows():
-        k = normalize_no_fn(str(row["nombre_corto"]))
-        bat_map[k] = str(row["nivel_5"])
+        try:
+            # Intentamos normalizar; si falla (por caracteres raros), usamos el nombre original
+            nombre_raw = str(row["nombre_corto"])
+            try:
+                k = normalize_no_fn(nombre_raw)
+            except:
+                k = nombre_raw
+            bat_map[k] = str(row["nivel_5"])
+        except:
+            continue
 
     return bat_map
 

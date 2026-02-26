@@ -374,22 +374,20 @@ def load_snapshot():
 
 
 # ==========================================================
-# Diagnósticos en GCS
+# ==========================================================
+# Diagnósticos en GCS (BLOQUE CORREGIDO)
 # ==========================================================
 
 def load_diag_from_gcs(no_key: str) -> dict | None:
     """
     Carga el JSON de diagnóstico de un pozo desde GCS.
-
-    Returns:
-        dict con el diagnóstico, o None si no existe.
     """
     import json
-
     client = get_gcs_client()
     if not client or not GCS_BUCKET:
         return None
 
+    # Mantenemos la estructura de subcarpeta: diagnosticos/POZO/diagnostico.json
     blob_name = f"diagnosticos/{no_key}/diagnostico.json"
     if GCS_PREFIX:
         blob_name = f"{GCS_PREFIX}/{blob_name}"
@@ -403,20 +401,59 @@ def load_diag_from_gcs(no_key: str) -> dict | None:
     except Exception:
         return None
 
+def load_all_diags_from_gcs(pozos_interes: list[str]) -> dict[str, dict]:
+    """
+    OPTIMIZADO: Lista todos los archivos de la carpeta diagnosticos/ de una sola vez.
+    Esto evita el Timeout (Error 500) y es mucho más rápido.
+    """
+    import json
+    client = get_gcs_client()
+    if not client or not GCS_BUCKET:
+        return {}
+
+    results = {}
+    try:
+        bucket = client.bucket(GCS_BUCKET)
+        prefix = "diagnosticos/"
+        if GCS_PREFIX:
+            prefix = f"{GCS_PREFIX}/{prefix}"
+
+        # Listamos TODO lo que hay en la carpeta de diagnósticos de un solo golpe
+        blobs = list(client.list_blobs(GCS_BUCKET, prefix=prefix))
+        
+        # Filtramos solo los que son diagnostico.json
+        for blob in blobs:
+            if not blob.name.endswith("diagnostico.json"):
+                continue
+            
+            # Extraemos el nombre del pozo de la ruta: diagnosticos/POZO/diagnostico.json
+            parts = blob.name.replace(prefix, "").split("/")
+            if not parts: continue
+            pozo_id = parts[0]
+
+            # Solo procesamos si el pozo está en nuestra lista de interés
+            if pozo_id in pozos_interes:
+                try:
+                    data = json.loads(blob.download_as_text(encoding="utf-8"))
+                    if "error" not in data:
+                        results[pozo_id] = data
+                except:
+                    continue
+    except Exception as e:
+        print(f"Error masivo cargando diagnósticos: {e}")
+
+    return results
 
 def save_diag_to_gcs(no_key: str, diag: dict) -> bool:
     """
     Guarda el JSON de diagnóstico de un pozo en GCS.
-
-    Returns:
-        True si se guardó correctamente, False si hubo error.
     """
     import json
-
     client = get_gcs_client()
     if not client or not GCS_BUCKET:
         return False
 
+    # Guardamos siempre en subcarpeta para mantener orden
     blob_name = f"diagnosticos/{no_key}/diagnostico.json"
     if GCS_PREFIX:
         blob_name = f"{GCS_PREFIX}/{blob_name}"
@@ -431,39 +468,6 @@ def save_diag_to_gcs(no_key: str, diag: dict) -> bool:
         return True
     except Exception:
         return False
-
-
-def load_all_diags_from_gcs(pozos: list[str]) -> dict[str, dict]:
-    """
-    Carga los diagnósticos de todos los pozos indicados desde GCS.
-    Solo incluye los que existen y no tienen error.
-
-    Returns:
-        dict { no_key: diag_dict }
-    """
-    import json
-
-    client = get_gcs_client()
-    if not client or not GCS_BUCKET:
-        return {}
-
-    results = {}
-    bucket  = client.bucket(GCS_BUCKET)
-
-    for no_key in pozos:
-        blob_name = f"diagnosticos/{no_key}/diagnostico.json"
-        if GCS_PREFIX:
-            blob_name = f"{GCS_PREFIX}/{blob_name}"
-        try:
-            blob = bucket.blob(blob_name)
-            if blob.exists():
-                data = json.loads(blob.download_as_text(encoding="utf-8"))
-                if "error" not in data:
-                    results[no_key] = data
-        except Exception:
-            pass
-
-    return results
 
 
 # ==========================================================

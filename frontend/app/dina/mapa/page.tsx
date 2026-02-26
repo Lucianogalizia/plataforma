@@ -24,12 +24,14 @@ export default function MapaPage() {
   const cargar = useCallback(async () => {
     setLoading(true);
     try {
-      const mapa = await api.getSnapshotMapa({
-        sum_min: sumMin, sum_max: sumMax,
-        dias_min: diasMin, dias_max: diasMax,
-        baterias: batSel.join(","),
-      });
-
+      const [mapa, bats] = await Promise.all([
+        api.getSnapshotMapa({
+          sum_min: sumMin, sum_max: sumMax,
+          dias_min: diasMin, dias_max: diasMax,
+          baterias: batSel.join(","),
+        }),
+        api.getBaterias(),
+      ]);
       let pts = mapa.puntos;
 
       if (filtroVal === "Solo no validadas") {
@@ -37,6 +39,13 @@ export default function MapaPage() {
       }
 
       setPuntos(pts);
+      if (bats.baterias && batSel.length === 0) {
+        const nombres = bats.baterias.map((b: { nombre: string } | string) =>
+          typeof b === "string" ? b : b.nombre
+        );
+        setBaterias(nombres);
+        setBatSel(nombres);
+      }
     } catch {
       setPuntos([]);
     }
@@ -45,30 +54,15 @@ export default function MapaPage() {
 
   useEffect(() => {
     api.getBaterias()
-      .then(async (r) => {
+      .then((r) => {
         const nombres = (r.baterias || []).map((b: { nombre: string } | string) =>
           typeof b === "string" ? b : b.nombre
         );
         setBaterias(nombres);
         setBatSel(nombres);
-
-        // primer carga usando la selección "todas" sin esperar al re-render
-        setLoading(true);
-        try {
-          const mapa = await api.getSnapshotMapa({
-            sum_min: sumMin, sum_max: sumMax,
-            dias_min: diasMin, dias_max: diasMax,
-            baterias: nombres.join(","),
-          });
-
-          let pts = mapa.puntos;
-          setPuntos(pts);
-        } catch {
-          setPuntos([]);
-        }
-        setLoading(false);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => cargar());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -114,45 +108,54 @@ export default function MapaPage() {
             </button>
 
             {batOpen && (
-              <div className="absolute z-50 mt-2 w-[260px] bg-[#0b1220] border border-[#334155] rounded shadow-lg p-2">
-                <input
-                  value={batSearch}
-                  onChange={(e) => setBatSearch(e.target.value)}
-                  placeholder="Buscar..."
-                  className="w-full bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200 mb-2"
-                />
-                <div className="max-h-64 overflow-auto space-y-1">
+              <div className="absolute z-50 mt-1 w-64 bg-[#1e293b] border border-[#334155] rounded shadow-xl">
+                {/* Buscador */}
+                <div className="p-2 border-b border-[#334155]">
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder="Buscar batería…"
+                    value={batSearch}
+                    onChange={(e) => setBatSearch(e.target.value)}
+                    className="w-full bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-600"
+                  />
+                </div>
+                {/* Acciones rápidas */}
+                <div className="flex gap-1 p-2 border-b border-[#334155]">
                   <button
                     onClick={() => setBatSel(baterias)}
-                    className="w-full text-left text-xs text-slate-300 hover:text-sky-400"
+                    className="text-xs px-2 py-0.5 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 flex-1"
                   >
-                    Seleccionar todas
+                    Todas
                   </button>
                   <button
                     onClick={() => setBatSel([])}
-                    className="w-full text-left text-xs text-slate-300 hover:text-sky-400"
+                    className="text-xs px-2 py-0.5 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 flex-1"
                   >
-                    Limpiar selección
+                    Ninguna
                   </button>
-
-                  <div className="h-px bg-[#334155] my-2" />
-
+                </div>
+                {/* Lista */}
+                <div className="overflow-y-auto max-h-52">
                   {batFiltradas.map((b) => (
-                    <label key={b} className="flex items-center gap-2 text-sm text-slate-200">
+                    <label
+                      key={b}
+                      className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-700/50 cursor-pointer text-xs text-slate-300"
+                    >
                       <input
                         type="checkbox"
                         checked={batSel.includes(b)}
                         onChange={() => toggleBat(b)}
+                        className="accent-sky-400 w-3 h-3"
                       />
-                      <span className="truncate">{b}</span>
+                      {b}
                     </label>
                   ))}
                 </div>
-
-                <div className="flex justify-end mt-2">
+                <div className="p-2 border-t border-[#334155]">
                   <button
                     onClick={() => setBatOpen(false)}
-                    className="text-xs text-slate-300 hover:text-sky-400"
+                    className="w-full text-xs px-2 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded"
                   >
                     Cerrar
                   </button>
@@ -161,86 +164,129 @@ export default function MapaPage() {
             )}
           </div>
 
-          {/* Sumergencia */}
+          {/* Rango Sumergencia */}
           <div>
-            <label className="text-xs text-slate-400 block mb-1">Sumergencia (m)</label>
+            <label className="text-xs text-slate-400 block mb-1">
+              Rango Sumergencia: {sumMin} – {sumMax}
+            </label>
             <div className="flex gap-2">
               <input
-                type="number"
-                value={sumMin}
-                onChange={(e) => setSumMin(Number(e.target.value))}
-                className="w-28 bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200"
+                type="number" value={sumMin}
+                onChange={(e) => setSumMin(+e.target.value)}
+                className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200 w-24"
+                placeholder="Min"
               />
               <input
-                type="number"
-                value={sumMax}
-                onChange={(e) => setSumMax(Number(e.target.value))}
-                className="w-28 bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200"
+                type="number" value={sumMax}
+                onChange={(e) => setSumMax(+e.target.value)}
+                className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200 w-24"
+                placeholder="Max"
               />
             </div>
           </div>
 
-          {/* Días */}
+          {/* Rango Días */}
           <div>
-            <label className="text-xs text-slate-400 block mb-1">Días desde última</label>
+            <label className="text-xs text-slate-400 block mb-1">
+              Días desde última: {diasMin} – {diasMax}
+            </label>
             <div className="flex gap-2">
               <input
-                type="number"
-                value={diasMin}
-                onChange={(e) => setDiasMin(Number(e.target.value))}
-                className="w-28 bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200"
+                type="number" value={diasMin}
+                onChange={(e) => setDiasMin(+e.target.value)}
+                className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200 w-24"
               />
               <input
-                type="number"
-                value={diasMax}
-                onChange={(e) => setDiasMax(Number(e.target.value))}
-                className="w-28 bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200"
+                type="number" value={diasMax}
+                onChange={(e) => setDiasMax(+e.target.value)}
+                className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200 w-24"
               />
             </div>
           </div>
 
-          {/* Validaciones */}
+          {/* Filtro validación */}
           <div>
-            <label className="text-xs text-slate-400 block mb-1">Validaciones</label>
-            <select
-              value={filtroVal}
-              onChange={(e) => setFiltroVal(e.target.value as any)}
-              className="bg-[#0f172a] border border-[#334155] rounded px-2 py-1 text-sm text-slate-200"
-            >
-              <option>Todos</option>
-              <option>Solo validadas</option>
-              <option>Solo no validadas</option>
-            </select>
-          </div>
-
-          <div className="flex items-end gap-2">
-            <button
-              onClick={cargar}
-              className="bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold px-4 py-2 rounded"
-            >
-              Aplicar
-            </button>
+            <label className="text-xs text-slate-400 block mb-1">Filtrar por validación</label>
+            <div className="flex gap-2">
+              {(["Todos", "Solo validadas", "Solo no validadas"] as const).map((op) => (
+                <button
+                  key={op}
+                  onClick={() => setFiltroVal(op)}
+                  className={`text-xs px-2 py-1 rounded border transition-colors ${
+                    filtroVal === op
+                      ? "bg-sky-500/10 border-sky-400 text-sky-300"
+                      : "border-slate-600 text-slate-400 hover:border-slate-400"
+                  }`}
+                >
+                  {op}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
+
+        <button
+          onClick={cargar}
+          disabled={loading}
+          className="px-4 py-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-40 rounded text-sm font-medium text-white transition-colors"
+        >
+          {loading ? "Cargando…" : "🔄 Aplicar filtros"}
+        </button>
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KPICard title="Puntos con coords" value={String(puntosConCoords.length)} />
-        <KPICard title="Min Sumergencia" value={sumValues.length ? String(Math.min(...sumValues)) : "-"} />
-        <KPICard title="Max Sumergencia" value={sumValues.length ? String(Math.max(...sumValues)) : "-"} />
-        <KPICard title="Selección baterías" value={`${batSel.length}/${baterias.length}`} />
+      <div className="grid grid-cols-3 gap-3">
+        <KPICard title="Pozos con coords" value={puntosConCoords.length} color="sky" />
+        <KPICard
+          title="Sumer. máx"
+          value={sumValues.length ? Math.max(...sumValues).toFixed(0) + " m" : "—"}
+          color="red"
+        />
+        <KPICard
+          title="Sumer. media"
+          value={
+            sumValues.length
+              ? (sumValues.reduce((a, b) => a + b, 0) / sumValues.length).toFixed(0) + " m"
+              : "—"
+          }
+          color="sky"
+        />
       </div>
 
-      {/* Mapa */}
-      <div className="card">
-        <MapaSumergencia puntos={puntosConCoords} loading={loading} />
-      </div>
+      {loading && (
+        <p className="text-slate-500 text-sm animate-pulse">Cargando mapa…</p>
+      )}
 
-      {/* Tabla */}
-      <div className="card">
-        <TablaValidaciones />
-      </div>
+      {!loading && puntosConCoords.length > 0 && (
+        <div className="card p-0 overflow-hidden">
+          <div className="px-4 py-3 border-b border-[#334155]">
+            <h3 className="text-sm font-medium text-slate-300">
+              Heatmap de Sumergencia — {puntosConCoords.length} pozos
+            </h3>
+          </div>
+          <div className="p-2">
+            <MapaSumergencia puntos={puntosConCoords} height={520} />
+          </div>
+        </div>
+      )}
+
+      {!loading && puntosConCoords.length === 0 && (
+        <div className="card text-center text-slate-500 text-sm py-8">
+          No hay pozos con coordenadas para los filtros seleccionados.
+        </div>
+      )}
+
+      {/* Tabla — recibe puntos ya filtrados */}
+      {puntos.length > 0 && (
+        <div className="space-y-4">
+          <div className="border-t border-[#334155] pt-6">
+            <h3 className="text-base font-semibold text-slate-200 mb-4">
+              📋 Pozos filtrados — selección, validación y exportación
+            </h3>
+            <TablaValidaciones pozos={puntos} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

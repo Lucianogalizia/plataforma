@@ -445,6 +445,10 @@ def generar_todos(
 # Construcción de tabla global (una fila por medición)
 # ==========================================================
 
+# ==========================================================
+# Construcción de tabla global (VERSIÓN FINAL PROTEGIDA)
+# ==========================================================
+
 def build_global_table(
     diags:          dict[str, dict],
     bat_map:         dict[str, str],
@@ -452,17 +456,20 @@ def build_global_table(
 ) -> pd.DataFrame:
     """
     Construye la tabla global de diagnósticos con UNA FILA POR MEDICIÓN.
-    Incluye protección contra datos corruptos y limpieza de valores no serializables (NaN).
+    Si un pozo tiene 3 DINs analizados → 3 filas en la tabla.
+
+    Incluye compatibilidad con JSONs viejos y limpieza de valores NaN/Inf.
     """
     rows = []
 
+    # Iteramos por cada pozo recuperado de GCS
     for no_key, diag in diags.items():
         try:
-            # 1. Validación de entrada: si el diagnóstico no es un diccionario, saltar
-            if not isinstance(diag, dict):
+            # --- SEGURO 1: Ignorar si el diagnóstico no es un diccionario válido ---
+            if not isinstance(diag, dict) or not no_key:
                 continue
 
-            # 2. Normalización segura del pozo para evitar KeyErrors con la batería
+            # --- SEGURO 2: Normalización segura del nombre del pozo ---
             try:
                 norm_key = normalize_no_fn(str(no_key))
             except:
@@ -470,11 +477,7 @@ def build_global_table(
 
             bateria       = bat_map.get(norm_key, "N/D")
             meta          = diag.get("_meta", {})
-            
-            # Formateo de fechas seguro
-            fecha_gen_raw = meta.get("generado_utc", "?")
-            fecha_gen     = str(fecha_gen_raw)[:19].replace("T", " ") if fecha_gen_raw else "?"
-            
+            fecha_gen     = str(meta.get("generado_utc", "?"))[:19].replace("T", " ")
             confianza     = diag.get("confianza", "?")
             recomendacion = diag.get("recomendacion", "")
 
@@ -494,8 +497,8 @@ def build_global_table(
                     "problemáticas":     probs_viejas,
                 }]
 
-            # 3. Procesamiento de cada medición del pozo
             for med in mediciones_list:
+                # --- SEGURO 3: Extracción segura de datos con .get() ---
                 fecha     = med.get("fecha",             "?")
                 label     = med.get("label",             "")
                 llenado   = med.get("llenado_pct")
@@ -505,7 +508,7 @@ def build_global_table(
                 balance   = med.get("pct_balance")
                 probs     = med.get("problemáticas",     [])
 
-                # Ordenar problemáticas por severidad de forma segura
+                # Ordenar problemáticas por severidad
                 try:
                     probs_sorted = sorted(
                         probs,
@@ -515,7 +518,7 @@ def build_global_table(
                         ),
                     )
                 except:
-                    probs_sorted = probs # Si falla el sort, dejamos el orden original
+                    probs_sorted = probs
 
                 if probs_sorted:
                     lineas = []
@@ -524,27 +527,28 @@ def build_global_table(
                         estado  = p.get("estado",    "ACTIVA")
                         emoji_s = SEVERIDAD_EMOJI.get(sev,    "⚪")
                         emoji_e = ESTADO_EMOJI.get(estado,    "")
-                        lineas.append(f"{emoji_e}{emoji_s} {p.get('nombre','?')} [{sev}]")
-                    
+                        lineas.append(
+                            f"{emoji_e}{emoji_s} {p.get('nombre','?')} [{sev}]"
+                        )
                     prob_texto = "\n".join(lineas)
                     prob_lista = [p.get("nombre", "?") for p in probs_sorted]
-                    
+
                     activas = [p for p in probs_sorted if p.get("estado") == "ACTIVA"]
                     
                     try:
                         sev_max = min(
-                            activas, 
+                            activas,
                             key=lambda x: SEVERIDAD_ORDEN.get(x.get("severidad", "BAJA"), 9)
                         ).get("severidad", "BAJA") if activas else "RESUELTA"
                     except:
                         sev_max = "BAJA"
-                        
+
                     n_activas   = len(activas)
                     n_resueltas = len(probs_sorted) - n_activas
                 else:
                     prob_texto, prob_lista, sev_max, n_activas, n_resueltas = "✅ Sin problemáticas", [], "NINGUNA", 0, 0
 
-                # 4. Construcción de la fila con tipos de datos nativos de Python
+                # Construcción de la fila con tipos nativos
                 rows.append({
                     "Pozo":          str(no_key),
                     "Batería":        str(bateria),
@@ -564,22 +568,24 @@ def build_global_table(
                     "Generado":      str(fecha_gen),
                 })
         except Exception as e:
-            # Si un pozo falla, se loguea y se continúa con el siguiente para evitar el Error 500
-            print(f"Error crítico construyendo tabla para pozo {no_key}: {e}")
+            # --- SEGURO 4: Si un pozo falla, lo saltamos para no matar la tabla completa ---
+            print(f"Error procesando pozo {no_key} en build_global_table: {e}")
             continue
 
-    # 5. Creación del DataFrame y limpieza final de NaNs/Infs
     df = pd.DataFrame(rows)
     if df.empty:
         return df
 
-    # LIMPIEZA PARA SERIALIZACIÓN JSON: Reemplaza NaNs por None e Infinitos por None
-    # Esto es VITAL para que FastAPI no responda con Error 500 al intentar enviar el JSON
+    # --- SEGURO 5: LIMPIEZA CRÍTICA PARA SERIALIZACIÓN JSON ---
+    # Reemplaza NaN por None (null en JSON) e Infinitos por None para evitar Error 500
     df = df.replace([float('inf'), float('-inf')], None)
     df = df.where(pd.notnull(df), None)
 
-    # 6. Ordenamiento final
-    sev_ord_ext = {"CRÍTICA": 0, "ALTA": 1, "MEDIA": 2, "BAJA": 3, "RESUELTA": 4, "NINGUNA": 5}
+    # Ordenar por severidad → batería → pozo → fecha
+    sev_ord_ext = {
+        "CRÍTICA":  0, "ALTA": 1, "MEDIA": 2, "BAJA": 3, "RESUELTA": 4, "NINGUNA": 5
+    }
+    
     if "Sev. máx" in df.columns:
         df["_sev_ord"] = df["Sev. máx"].map(sev_ord_ext).fillna(9)
         sort_cols = [c for c in ["_sev_ord", "Batería", "Pozo", "Fecha DIN"] if c in df.columns]

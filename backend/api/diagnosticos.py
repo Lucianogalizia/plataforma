@@ -4,18 +4,13 @@
 # Endpoints REST para diagnósticos IA
 #
 # Rutas:
-#   GET    /api/diagnosticos/tabla-global     → tabla global (una fila por medición)
-#   GET    /api/diagnosticos/estado-cache     → estado del caché GCS
-#   GET    /api/diagnosticos/kpis             → KPIs de la tabla global
-#   POST   /api/diagnosticos/generar-todos    → genera diagnósticos en lote
-#   GET    /api/diagnosticos/estado-batch     → estado del batch
-#   GET    /api/diagnosticos/{pozo}           → diagnóstico de un pozo
-#   POST   /api/diagnosticos/{pozo}/generar   → genera/regenera diagnóstico
-#   DELETE /api/diagnosticos/{pozo}           → elimina el caché de un pozo
-#
-# IMPORTANTE:
-#   En FastAPI, rutas dinámicas tipo "/{pozo}" NO deben ir antes que rutas fijas
-#   ("/tabla-global", "/estado-cache", etc.) porque se las “come”.
+#   GET  /api/diagnosticos/{pozo}           → diagnóstico de un pozo
+#   POST /api/diagnosticos/{pozo}/generar   → genera/regenera diagnóstico
+#   POST /api/diagnosticos/generar-todos    → genera diagnósticos en lote
+#   GET  /api/diagnosticos/tabla-global     → tabla global (una fila por medición)
+#   GET  /api/diagnosticos/estado-cache     → estado del caché GCS
+#   GET  /api/diagnosticos/kpis             → KPIs de la tabla global
+#   DELETE /api/diagnosticos/{pozo}         → elimina el caché de un pozo
 # ==========================================================
 
 from __future__ import annotations
@@ -125,6 +120,113 @@ def _get_pozos_con_din(din_ok: pd.DataFrame) -> list[str]:
     if din_ok.empty or "NO_key" not in din_ok.columns:
         return []
     return sorted(din_ok["NO_key"].dropna().unique().tolist())
+
+
+# ==========================================================
+# GET /api/diagnosticos/{pozo}
+# ==========================================================
+
+@router.get("/{pozo}")
+async def get_diagnostico_pozo(
+    pozo:       str,
+    regenerar:  bool = Query(
+        False,
+        description="Si True, regenera aunque el caché sea válido"
+    ),
+):
+    """
+    Devuelve el diagnóstico IA de un pozo.
+    Si existe caché válido en GCS y regenerar=False, lo devuelve directo.
+    Si regenerar=True o el caché está desactualizado, lo regenera en el momento.
+
+    Path params:
+        pozo: NO_key del pozo
+
+    Query params:
+        regenerar: bool (default False)
+
+    Returns:
+        dict con el diagnóstico completo o { "error": str }
+    """
+    no_key = normalize_no_exact(pozo)
+    if not no_key:
+        raise HTTPException(status_code=400, detail="Pozo inválido")
+
+    din_ok, niv_ok = _load_din_niv_ok()
+
+    # --- Verificar caché ---
+    cache = load_diag_from_gcs(no_key) if GCS_BUCKET else None
+
+    if not regenerar and not necesita_regenerar(cache, din_ok, no_key):
+        return cache
+
+    # --- Regenerar ---
+    api_key = get_openai_key()
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="API key de OpenAI no configurada. "
+                   "Verificá GCP Secret Manager o variable OPENAI_API_KEY."
+        )
+
+    diag = generar_diagnostico(
+        no_key=no_key,
+        din_ok=din_ok,
+        resolve_path_fn=resolve_existing_path,
+        api_key=api_key,
+        niv_ok=niv_ok,
+    )
+
+    if "error" in diag:
+        raise HTTPException(
+            status_code=500,
+            detail=diag["error"]
+        )
+
+    return diag
+
+
+# ==========================================================
+# POST /api/diagnosticos/{pozo}/generar
+# ==========================================================
+
+@router.post("/{pozo}/generar")
+async def post_generar_diagnostico(pozo: str):
+    """
+    Fuerza la regeneración del diagnóstico de un pozo,
+    ignorando el caché existente.
+
+    Path params:
+        pozo: NO_key del pozo
+
+    Returns:
+        dict con el diagnóstico recién generado o { "error": str }
+    """
+    no_key = normalize_no_exact(pozo)
+    if not no_key:
+        raise HTTPException(status_code=400, detail="Pozo inválido")
+
+    api_key = get_openai_key()
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="API key de OpenAI no configurada."
+        )
+
+    din_ok, niv_ok = _load_din_niv_ok()
+
+    diag = generar_diagnostico(
+        no_key=no_key,
+        din_ok=din_ok,
+        resolve_path_fn=resolve_existing_path,
+        api_key=api_key,
+        niv_ok=niv_ok,
+    )
+
+    if "error" in diag:
+        raise HTTPException(status_code=500, detail=diag["error"])
+
+    return diag
 
 
 # ==========================================================
@@ -300,6 +402,25 @@ async def get_tabla_global(
     """
     Devuelve la tabla global de diagnósticos con UNA FILA POR MEDICIÓN.
     Si un pozo tiene 3 DINs analizados → 3 filas.
+
+    Query params:
+        baterias:     lista separada por coma (opcional)
+        severidad:    filtra por severidad máxima (opcional)
+        solo_activas: si True, solo mediciones con problemáticas ACTIVAS
+
+    Returns:
+        {
+            "total":  int,
+            "tabla":  [
+                {
+                    Pozo, Batería, Fecha DIN, Medición,
+                    Llenado %, Sumergencia, Caudal m³/d, %Balance,
+                    Sev. máx, Act., Res., Problemáticas,
+                    _prob_lista, Recomendación, Confianza, Generado
+                }
+            ],
+            "kpis":   { pozos_diagnosticados, mediciones_totales, criticos, ... }
+        }
     """
     din_ok, _ = _load_din_niv_ok()
     pozos     = _get_pozos_con_din(din_ok)
@@ -349,6 +470,14 @@ async def get_estado_cache_endpoint():
     """
     Devuelve el estado del caché de diagnósticos en GCS.
     Indica cuántos pozos están listos y cuántos requieren regeneración.
+
+    Returns:
+        {
+            "total":      int,
+            "listos":     int,
+            "pendientes": int,
+            "pct_listo":  float,
+        }
     """
     din_ok, _ = _load_din_niv_ok()
     pozos     = _get_pozos_con_din(din_ok)
@@ -376,6 +505,15 @@ async def get_estado_cache_endpoint():
 async def get_kpis_diagnosticos():
     """
     Devuelve los KPIs principales de la tabla global de diagnósticos.
+
+    Returns:
+        {
+            "pozos_diagnosticados": int,
+            "mediciones_totales":   int,
+            "criticos":             int,
+            "alta_severidad":       int,
+            "sin_problematicas":    int,
+        }
     """
     din_ok, _ = _load_din_niv_ok()
     pozos     = _get_pozos_con_din(din_ok)
@@ -397,102 +535,7 @@ async def get_kpis_diagnosticos():
 
 
 # ==========================================================
-# GET /api/diagnosticos/{pozo}
-# (MOVIDO AL FINAL para no pisar rutas fijas)
-# ==========================================================
-
-@router.get("/{pozo}")
-async def get_diagnostico_pozo(
-    pozo:       str,
-    regenerar:  bool = Query(
-        False,
-        description="Si True, regenera aunque el caché sea válido"
-    ),
-):
-    """
-    Devuelve el diagnóstico IA de un pozo.
-    Si existe caché válido en GCS y regenerar=False, lo devuelve directo.
-    Si regenerar=True o el caché está desactualizado, lo regenera en el momento.
-    """
-    no_key = normalize_no_exact(pozo)
-    if not no_key:
-        raise HTTPException(status_code=400, detail="Pozo inválido")
-
-    din_ok, niv_ok = _load_din_niv_ok()
-
-    # --- Verificar caché ---
-    cache = load_diag_from_gcs(no_key) if GCS_BUCKET else None
-
-    if not regenerar and not necesita_regenerar(cache, din_ok, no_key):
-        return cache
-
-    # --- Regenerar ---
-    api_key = get_openai_key()
-    if not api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="API key de OpenAI no configurada. "
-                   "Verificá GCP Secret Manager o variable OPENAI_API_KEY."
-        )
-
-    diag = generar_diagnostico(
-        no_key=no_key,
-        din_ok=din_ok,
-        resolve_path_fn=resolve_existing_path,
-        api_key=api_key,
-        niv_ok=niv_ok,
-    )
-
-    if "error" in diag:
-        raise HTTPException(
-            status_code=500,
-            detail=diag["error"]
-        )
-
-    return diag
-
-
-# ==========================================================
-# POST /api/diagnosticos/{pozo}/generar
-# (MOVIDO AL FINAL para no pisar rutas fijas)
-# ==========================================================
-
-@router.post("/{pozo}/generar")
-async def post_generar_diagnostico(pozo: str):
-    """
-    Fuerza la regeneración del diagnóstico de un pozo,
-    ignorando el caché existente.
-    """
-    no_key = normalize_no_exact(pozo)
-    if not no_key:
-        raise HTTPException(status_code=400, detail="Pozo inválido")
-
-    api_key = get_openai_key()
-    if not api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="API key de OpenAI no configurada."
-        )
-
-    din_ok, niv_ok = _load_din_niv_ok()
-
-    diag = generar_diagnostico(
-        no_key=no_key,
-        din_ok=din_ok,
-        resolve_path_fn=resolve_existing_path,
-        api_key=api_key,
-        niv_ok=niv_ok,
-    )
-
-    if "error" in diag:
-        raise HTTPException(status_code=500, detail=diag["error"])
-
-    return diag
-
-
-# ==========================================================
 # DELETE /api/diagnosticos/{pozo}
-# (MOVIDO AL FINAL para no pisar rutas fijas)
 # ==========================================================
 
 @router.delete("/{pozo}")
@@ -500,6 +543,12 @@ async def delete_diagnostico_pozo(pozo: str):
     """
     Elimina el diagnóstico cacheado de un pozo en GCS.
     Útil para forzar regeneración limpia en la próxima consulta.
+
+    Path params:
+        pozo: NO_key del pozo
+
+    Returns:
+        { "ok": bool, "pozo": str }
     """
     no_key = normalize_no_exact(pozo)
     if not no_key:

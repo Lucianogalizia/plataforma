@@ -3,13 +3,18 @@
 #
 # Endpoints REST para el sistema de validaciones de sumergencias
 #
+# IMPORTANTE: Las rutas estáticas (tabla, historial, resumen, bulk)
+# DEBEN estar definidas ANTES que /{pozo} para que FastAPI no las
+# interprete como un parámetro de path.
+#
 # Rutas:
-#   GET  /api/validaciones/{pozo}           → estado de validaciones de un pozo
-#   POST /api/validaciones/{pozo}           → guardar validación de una medición
-#   POST /api/validaciones/{pozo}/bulk      → guardar múltiples validaciones
 #   GET  /api/validaciones/tabla            → tabla completa para visualización
 #   GET  /api/validaciones/historial        → historial completo para export
 #   GET  /api/validaciones/resumen          → estadísticas globales
+#   POST /api/validaciones/bulk             → guardar múltiples validaciones
+#   GET  /api/validaciones/{pozo}           → estado de validaciones de un pozo
+#   POST /api/validaciones/{pozo}           → guardar validación de una medición
+#   POST /api/validaciones/{pozo}/bulk      → guardar múltiples validaciones
 # ==========================================================
 
 from __future__ import annotations
@@ -49,11 +54,10 @@ router = APIRouter()
 
 
 # ==========================================================
-# Modelos Pydantic (cuerpos de POST)
+# Modelos Pydantic
 # ==========================================================
 
 class ValidacionItem(BaseModel):
-    """Cuerpo para guardar una validación individual."""
     fecha_key:  str
     validada:   bool
     comentario: str  = ""
@@ -61,7 +65,6 @@ class ValidacionItem(BaseModel):
 
 
 class ValidacionBulkItem(BaseModel):
-    """Un cambio dentro de un bulk."""
     no_key:     str
     fecha_key:  str
     validada:   bool
@@ -69,7 +72,6 @@ class ValidacionBulkItem(BaseModel):
 
 
 class ValidacionBulkRequest(BaseModel):
-    """Cuerpo para guardar múltiples validaciones en un solo request."""
     cambios:  list[ValidacionBulkItem]
     usuario:  str = "anónimo"
 
@@ -79,10 +81,6 @@ class ValidacionBulkRequest(BaseModel):
 # ==========================================================
 
 def _load_snap_map() -> pd.DataFrame:
-    """
-    Carga el snapshot para el mapa (1 fila por pozo).
-    Usado como base para construir la tabla de validaciones.
-    """
     df_din = load_din_index()
     df_niv = load_niv_index()
 
@@ -91,12 +89,6 @@ def _load_snap_map() -> pd.DataFrame:
             lambda x: resolve_existing_path(x) if pd.notna(x) else None
         )
 
-    _, df_din_k, df_niv_k, col_map = (
-        None,
-        *prepare_indexes(df_din, df_niv),
-    ) if False else (*prepare_indexes(df_din, df_niv), None)
-
-    # Forma correcta — prepare_indexes devuelve 3 valores
     df_din_k, df_niv_k, col_map = prepare_indexes(df_din, df_niv)
 
     din_ok = df_din_k.copy()
@@ -123,7 +115,6 @@ def _load_snap_map() -> pd.DataFrame:
         snap_map.get("Sumergencia"), errors="coerce"
     )
 
-    # Merge coordenadas y Batería
     coords = load_coords_repo()
     if (
         not coords.empty
@@ -151,129 +142,158 @@ def _load_snap_map() -> pd.DataFrame:
 
 
 # ==========================================================
-# GET /api/validaciones/{pozo}
+# *** RUTAS ESTÁTICAS PRIMERO ***
+# (deben ir ANTES de /{pozo} para que FastAPI no las capture)
 # ==========================================================
 
-@router.get("/{pozo}")
-async def get_validaciones_pozo(pozo: str):
+# ----------------------------------------------------------
+# GET /api/validaciones/tabla
+# ----------------------------------------------------------
+
+@router.get("/tabla")
+async def get_tabla_validaciones(
+    sum_min:           Optional[float] = Query(None),
+    sum_max:           Optional[float] = Query(None),
+    dias_min:          Optional[float] = Query(None),
+    dias_max:          Optional[float] = Query(None),
+    baterias:          Optional[str]   = Query(None),
+    solo_validadas:    Optional[bool]  = Query(None),
+    solo_no_validadas: Optional[bool]  = Query(None),
+):
     """
-    Devuelve el estado actual de validaciones de un pozo.
-
-    Path params:
-        pozo: NO_key del pozo (se normaliza internamente)
-
-    Returns:
-        {
-            "pozo":       str,
-            "mediciones": {
-                "YYYY-MM-DD HH:MM": {
-                    "validada":   bool,
-                    "comentario": str,
-                    "historial":  [...]
-                }
-            }
-        }
+    Tabla completa de validaciones con comentarios cargados desde GCS.
     """
-    no_key = normalize_no_exact(pozo)
-    if not no_key:
-        raise HTTPException(status_code=400, detail="Pozo inválido")
+    snap_map = _load_snap_map()
 
-    val_data = load_validaciones(no_key)
+    if snap_map.empty:
+        return {"total": 0, "filas": []}
 
-    return {
-        "pozo":       no_key,
-        "mediciones": val_data.get("mediciones", {}),
-    }
+    if "lat" in snap_map.columns and "lon" in snap_map.columns:
+        snap_map = snap_map[
+            snap_map["lat"].notna() & snap_map["lon"].notna()
+        ].copy()
+
+    if "nivel_5" in snap_map.columns:
+        snap_map["nivel_5"] = snap_map["nivel_5"].astype("string").str.strip()
+
+    if baterias and "nivel_5" in snap_map.columns:
+        bat_list = [b.strip() for b in baterias.split(",") if b.strip()]
+        if bat_list:
+            snap_map = snap_map[snap_map["nivel_5"].isin(bat_list)]
+
+    if sum_min is not None and "Sumergencia" in snap_map.columns:
+        snap_map = snap_map[
+            snap_map["Sumergencia"].isna() | (snap_map["Sumergencia"] >= sum_min)
+        ]
+    if sum_max is not None and "Sumergencia" in snap_map.columns:
+        snap_map = snap_map[
+            snap_map["Sumergencia"].isna() | (snap_map["Sumergencia"] <= sum_max)
+        ]
+    if dias_min is not None and "Dias_desde_ultima" in snap_map.columns:
+        snap_map = snap_map[snap_map["Dias_desde_ultima"] >= dias_min]
+    if dias_max is not None and "Dias_desde_ultima" in snap_map.columns:
+        snap_map = snap_map[snap_map["Dias_desde_ultima"] <= dias_max]
+
+    if "Sumergencia" in snap_map.columns:
+        snap_map = snap_map.sort_values(
+            ["Sumergencia"], ascending=False, na_position="last"
+        ).reset_index(drop=True)
+
+    pozos_tabla = snap_map["NO_key"].dropna().unique().tolist()
+    todas_val   = load_all_validaciones(pozos_tabla)
+
+    filas = build_tabla_validaciones(snap_map, todas_val, normalize_no_exact)
+
+    lat_map  = {}
+    lon_map  = {}
+    dias_map = {}
+
+    if "lat" in snap_map.columns:
+        lat_map = dict(zip(snap_map["NO_key"], snap_map["lat"]))
+    if "lon" in snap_map.columns:
+        lon_map = dict(zip(snap_map["NO_key"], snap_map["lon"]))
+    if "Dias_desde_ultima" in snap_map.columns:
+        dias_map = dict(zip(snap_map["NO_key"], snap_map["Dias_desde_ultima"]))
+
+    for fila in filas:
+        nk = fila.get("_no_key", "")
+        fila["lat"]               = lat_map.get(nk)
+        fila["lon"]               = lon_map.get(nk)
+        fila["Dias_desde_ultima"] = dias_map.get(nk)
+
+    if solo_validadas:
+        filas = [f for f in filas if f.get("validada", True)]
+    elif solo_no_validadas:
+        filas = [f for f in filas if not f.get("validada", True)]
+
+    return {"total": len(filas), "filas": filas}
 
 
-# ==========================================================
-# POST /api/validaciones/{pozo}
-# ==========================================================
+# ----------------------------------------------------------
+# GET /api/validaciones/historial
+# ----------------------------------------------------------
 
-@router.post("/{pozo}")
-async def post_validacion_pozo(pozo: str, body: ValidacionItem):
-    """
-    Guarda o actualiza la validación de una medición específica de un pozo.
-    Agrega al historial solo si algo cambió.
+@router.get("/historial")
+async def get_historial_validaciones(
+    pozos: Optional[str] = Query(None),
+):
+    """Historial completo de validaciones para exportar."""
+    if pozos:
+        pozos_list = [
+            normalize_no_exact(p.strip())
+            for p in pozos.split(",")
+            if p.strip()
+        ]
+    else:
+        snap_map   = _load_snap_map()
+        pozos_list = snap_map["NO_key"].dropna().unique().tolist() if not snap_map.empty else []
 
-    Path params:
-        pozo: NO_key del pozo
+    if not pozos_list:
+        return {"total": 0, "historial": []}
 
-    Body (ValidacionItem):
-        fecha_key:  "YYYY-MM-DD HH:MM"
-        validada:   bool
-        comentario: str (opcional)
-        usuario:    str (opcional, default "anónimo")
+    todas_val = load_all_validaciones(pozos_list)
+    historial = build_historial_completo(todas_val)
 
-    Returns:
-        {
-            "ok":        bool,
-            "pozo":      str,
-            "fecha_key": str,
-            "estado":    { validada, comentario, historial }
-        }
-    """
-    no_key = normalize_no_exact(pozo)
-    if not no_key:
-        raise HTTPException(status_code=400, detail="Pozo inválido")
+    return {"total": len(historial), "historial": historial}
 
-    # Cargar estado actual
-    val_data = load_validaciones(no_key)
 
-    # Aplicar cambio
-    val_data = set_validacion(
-        val_data=val_data,
-        no_key=no_key,
-        fecha_key=body.fecha_key,
-        validada=body.validada,
-        comentario=body.comentario.strip(),
-        usuario=body.usuario.strip() or "anónimo",
+# ----------------------------------------------------------
+# GET /api/validaciones/resumen
+# ----------------------------------------------------------
+
+@router.get("/resumen")
+async def get_resumen_validaciones():
+    """Estadísticas globales del sistema de validaciones."""
+    snap_map   = _load_snap_map()
+    pozos_list = (
+        snap_map["NO_key"].dropna().unique().tolist()
+        if not snap_map.empty else []
     )
 
-    # Guardar en GCS
-    ok = save_validaciones(no_key, val_data)
-    if not ok:
-        raise HTTPException(
-            status_code=500,
-            detail="Error al guardar en GCS. Verificá la conexión."
-        )
+    if not pozos_list:
+        return {
+            "total_pozos":      0,
+            "total_mediciones": 0,
+            "validadas":        0,
+            "no_validadas":     0,
+            "con_comentario":   0,
+            "total_cambios":    0,
+        }
 
-    estado = get_validacion(val_data, body.fecha_key)
-
-    return {
-        "ok":        True,
-        "pozo":      no_key,
-        "fecha_key": body.fecha_key,
-        "estado":    estado,
-    }
+    todas_val = load_all_validaciones(pozos_list)
+    return resumen_validaciones(todas_val)
 
 
-# ==========================================================
-# POST /api/validaciones/{pozo}/bulk
-# ==========================================================
+# ----------------------------------------------------------
+# POST /api/validaciones/bulk
+# ----------------------------------------------------------
 
 @router.post("/bulk")
 async def post_validaciones_bulk(body: ValidacionBulkRequest):
-    """
-    Guarda múltiples validaciones de diferentes pozos en un solo request.
-    Útil para guardar todos los cambios del data_editor de la tabla.
-
-    Body (ValidacionBulkRequest):
-        cambios: lista de { no_key, fecha_key, validada, comentario }
-        usuario: nombre del usuario
-
-    Returns:
-        {
-            "ok":       bool,
-            "guardados": int,
-            "errores":   int,
-            "detalle":   [{ "no_key", "fecha_key", "ok", "error" }]
-        }
-    """
+    """Guarda múltiples validaciones de diferentes pozos en un solo request."""
     if not body.cambios:
         return {"ok": True, "guardados": 0, "errores": 0, "detalle": []}
 
-    # Agrupar cambios por pozo para minimizar lecturas/escrituras GCS
     cambios_por_pozo: dict[str, list] = {}
     for c in body.cambios:
         no_key = normalize_no_exact(c.no_key)
@@ -286,7 +306,6 @@ async def post_validaciones_bulk(body: ValidacionBulkRequest):
     detalle   = []
 
     for no_key, cambios_pozo in cambios_por_pozo.items():
-        # Una sola lectura por pozo
         val_data = load_validaciones(no_key)
 
         for c in cambios_pozo:
@@ -299,7 +318,6 @@ async def post_validaciones_bulk(body: ValidacionBulkRequest):
                 usuario=body.usuario.strip() or "anónimo",
             )
 
-        # Una sola escritura por pozo
         ok = save_validaciones(no_key, val_data)
 
         for c in cambios_pozo:
@@ -321,7 +339,7 @@ async def post_validaciones_bulk(body: ValidacionBulkRequest):
                 })
 
     return {
-        "ok":       errores == 0,
+        "ok":        errores == 0,
         "guardados": guardados,
         "errores":   errores,
         "detalle":   detalle,
@@ -329,217 +347,63 @@ async def post_validaciones_bulk(body: ValidacionBulkRequest):
 
 
 # ==========================================================
-# GET /api/validaciones/tabla
+# *** RUTAS DINÁMICAS AL FINAL ***
+# /{pozo} debe ir DESPUÉS de todas las rutas estáticas
 # ==========================================================
 
-@router.get("/tabla")
-async def get_tabla_validaciones(
-    sum_min:  Optional[float] = Query(None),
-    sum_max:  Optional[float] = Query(None),
-    dias_min: Optional[float] = Query(None),
-    dias_max: Optional[float] = Query(None),
-    baterias: Optional[str]   = Query(
-        None,
-        description="Baterías separadas por coma"
-    ),
-    solo_validadas:    Optional[bool] = Query(None),
-    solo_no_validadas: Optional[bool] = Query(None),
-):
-    """
-    Devuelve la tabla completa de validaciones para renderizar
-    en el frontend (equivalente al data_editor del Tab Mapa).
+# ----------------------------------------------------------
+# GET /api/validaciones/{pozo}
+# ----------------------------------------------------------
 
-    Query params:
-        sum_min / sum_max:     rango de Sumergencia
-        dias_min / dias_max:   rango de días desde última medición
-        baterias:              lista separada por coma
-        solo_validadas:        True → solo validadas
-        solo_no_validadas:     True → solo no validadas
+@router.get("/{pozo}")
+async def get_validaciones_pozo(pozo: str):
+    """Devuelve el estado actual de validaciones de un pozo."""
+    no_key = normalize_no_exact(pozo)
+    if not no_key:
+        raise HTTPException(status_code=400, detail="Pozo inválido")
 
-    Returns:
-        {
-            "total": int,
-            "filas": [
-                {
-                    "validada":        bool,
-                    "pozo":            str,
-                    "bateria":         str,
-                    "fecha_medicion":  str,
-                    "sumergencia_m":   float | None,
-                    "base":            str,
-                    "comentario":      str,
-                    "usuario":         str,
-                    "_no_key":         str,
-                    "_fecha_key":      str,
-                    "lat":             float | None,
-                    "lon":             float | None,
-                    "Dias_desde_ultima": float | None,
-                }
-            ]
-        }
-    """
-    snap_map = _load_snap_map()
+    val_data = load_validaciones(no_key)
 
-    if snap_map.empty:
-        return {"total": 0, "filas": []}
-
-    # Solo con coordenadas válidas
-    if "lat" in snap_map.columns and "lon" in snap_map.columns:
-        snap_map = snap_map[
-            snap_map["lat"].notna() & snap_map["lon"].notna()
-        ].copy()
-
-    # Normalizar nivel_5
-    if "nivel_5" in snap_map.columns:
-        snap_map["nivel_5"] = snap_map["nivel_5"].astype("string").str.strip()
-
-    # --- Filtros geográficos/temporales ---
-    if baterias and "nivel_5" in snap_map.columns:
-        bat_list = [b.strip() for b in baterias.split(",") if b.strip()]
-        if bat_list:
-            snap_map = snap_map[snap_map["nivel_5"].isin(bat_list)]
-
-    if sum_min is not None and "Sumergencia" in snap_map.columns:
-        snap_map = snap_map[
-            snap_map["Sumergencia"].isna() | (snap_map["Sumergencia"] >= sum_min)
-        ]
-    if sum_max is not None and "Sumergencia" in snap_map.columns:
-        snap_map = snap_map[
-            snap_map["Sumergencia"].isna() | (snap_map["Sumergencia"] <= sum_max)
-        ]
-    if dias_min is not None and "Dias_desde_ultima" in snap_map.columns:
-        snap_map = snap_map[snap_map["Dias_desde_ultima"] >= dias_min]
-    if dias_max is not None and "Dias_desde_ultima" in snap_map.columns:
-        snap_map = snap_map[snap_map["Dias_desde_ultima"] <= dias_max]
-
-    # --- Ordenar por Sumergencia descendente ---
-    if "Sumergencia" in snap_map.columns:
-        snap_map = snap_map.sort_values(
-            ["Sumergencia"], ascending=False, na_position="last"
-        ).reset_index(drop=True)
-
-    # --- Cargar validaciones ---
-    pozos_tabla = snap_map["NO_key"].dropna().unique().tolist()
-    todas_val   = load_all_validaciones(pozos_tabla)
-
-    # --- Construir tabla ---
-    filas = build_tabla_validaciones(snap_map, todas_val, normalize_no_exact)
-
-    # --- Agregar lat/lon/dias a cada fila ---
-    lat_map  = {}
-    lon_map  = {}
-    dias_map = {}
-
-    if "lat" in snap_map.columns:
-        lat_map = dict(zip(snap_map["NO_key"], snap_map["lat"]))
-    if "lon" in snap_map.columns:
-        lon_map = dict(zip(snap_map["NO_key"], snap_map["lon"]))
-    if "Dias_desde_ultima" in snap_map.columns:
-        dias_map = dict(zip(snap_map["NO_key"], snap_map["Dias_desde_ultima"]))
-
-    for fila in filas:
-        nk = fila.get("_no_key", "")
-        fila["lat"]              = lat_map.get(nk)
-        fila["lon"]              = lon_map.get(nk)
-        fila["Dias_desde_ultima"] = dias_map.get(nk)
-
-    # --- Filtro por validación ---
-    if solo_validadas:
-        filas = [f for f in filas if f.get("validada", True)]
-    elif solo_no_validadas:
-        filas = [f for f in filas if not f.get("validada", True)]
-
-    return {"total": len(filas), "filas": filas}
+    return {
+        "pozo":       no_key,
+        "mediciones": val_data.get("mediciones", {}),
+    }
 
 
-# ==========================================================
-# GET /api/validaciones/historial
-# ==========================================================
+# ----------------------------------------------------------
+# POST /api/validaciones/{pozo}
+# ----------------------------------------------------------
 
-@router.get("/historial")
-async def get_historial_validaciones(
-    pozos: Optional[str] = Query(
-        None,
-        description="NO_keys separados por coma. Si vacío, devuelve todos."
-    ),
-):
-    """
-    Devuelve el historial completo de validaciones para exportar.
-    Incluye estado actual y cada cambio registrado.
+@router.post("/{pozo}")
+async def post_validacion_pozo(pozo: str, body: ValidacionItem):
+    """Guarda o actualiza la validación de una medición específica."""
+    no_key = normalize_no_exact(pozo)
+    if not no_key:
+        raise HTTPException(status_code=400, detail="Pozo inválido")
 
-    Query params:
-        pozos: lista de NO_key separados por coma (opcional)
+    val_data = load_validaciones(no_key)
 
-    Returns:
-        {
-            "total": int,
-            "historial": [
-                {
-                    "Pozo":       str,
-                    "Fecha":      str,
-                    "Validada":   bool,
-                    "Comentario": str,
-                    "Tipo":       "ESTADO_ACTUAL" | "CAMBIO",
-                    "Timestamp":  str,
-                    "Usuario":    str,
-                }
-            ]
-        }
-    """
-    if pozos:
-        pozos_list = [
-            normalize_no_exact(p.strip())
-            for p in pozos.split(",")
-            if p.strip()
-        ]
-    else:
-        # Si no se especifican, cargar todos los del snapshot
-        snap_map   = _load_snap_map()
-        pozos_list = snap_map["NO_key"].dropna().unique().tolist() if not snap_map.empty else []
-
-    if not pozos_list:
-        return {"total": 0, "historial": []}
-
-    todas_val = load_all_validaciones(pozos_list)
-    historial = build_historial_completo(todas_val)
-
-    return {"total": len(historial), "historial": historial}
-
-
-# ==========================================================
-# GET /api/validaciones/resumen
-# ==========================================================
-
-@router.get("/resumen")
-async def get_resumen_validaciones():
-    """
-    Devuelve estadísticas globales del sistema de validaciones.
-
-    Returns:
-        {
-            "total_pozos":       int,
-            "total_mediciones":  int,
-            "validadas":         int,
-            "no_validadas":      int,
-            "con_comentario":    int,
-            "total_cambios":     int,
-        }
-    """
-    snap_map   = _load_snap_map()
-    pozos_list = (
-        snap_map["NO_key"].dropna().unique().tolist()
-        if not snap_map.empty else []
+    val_data = set_validacion(
+        val_data=val_data,
+        no_key=no_key,
+        fecha_key=body.fecha_key,
+        validada=body.validada,
+        comentario=body.comentario.strip(),
+        usuario=body.usuario.strip() or "anónimo",
     )
 
-    if not pozos_list:
-        return {
-            "total_pozos":      0,
-            "total_mediciones": 0,
-            "validadas":        0,
-            "no_validadas":     0,
-            "con_comentario":   0,
-            "total_cambios":    0,
-        }
+    ok = save_validaciones(no_key, val_data)
+    if not ok:
+        raise HTTPException(
+            status_code=500,
+            detail="Error al guardar en GCS."
+        )
 
-    todas_val = load_all_validaciones(pozos_list)
-    return resumen_validaciones(todas_val)
+    estado = get_validacion(val_data, body.fecha_key)
+
+    return {
+        "ok":        True,
+        "pozo":      no_key,
+        "fecha_key": body.fecha_key,
+        "estado":    estado,
+    }

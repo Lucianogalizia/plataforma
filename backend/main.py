@@ -91,14 +91,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"  GCS Client:  ❌ Error: {e}")
 
-    try:
-        from core.gcs import load_din_index, load_niv_index
-        df_din = load_din_index()
-        df_niv = load_niv_index()
-        print(f"  DIN Index:   ✅ {len(df_din)} registros")
-        print(f"  NIV Index:   ✅ {len(df_niv)} registros")
-    except Exception as e:
-        print(f"  Índices:     ❌ Error al cargar: {e}")
+    print(f"  Índices:     ⏳ Se cargarán en el primer request")
 
     try:
         from ia.diagnostico import get_openai_key

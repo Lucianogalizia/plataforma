@@ -46,12 +46,8 @@ from core.validaciones import (
     make_fecha_key,
     get_validacion,
 )
-from core.cache import cache  # ← AGREGADO
 
 router = APIRouter()
-
-_SNAP_TTL = 600   # 10 minutos  ← AGREGADO
-_BAT_TTL  = 1800  # 30 minutos para baterías  ← AGREGADO
 
 
 # ==========================================================
@@ -65,12 +61,6 @@ def _load_indexes_ok():
     Returns:
         (din_ok, niv_ok, col_map)
     """
-    # ── CACHÉ ──────────────────────────────────────────────
-    cached = cache.get("indexes_ok")
-    if cached is not None:
-        return cached
-    # ───────────────────────────────────────────────────────
-
     df_din = load_din_index()
     df_niv = load_niv_index()
 
@@ -89,11 +79,7 @@ def _load_indexes_ok():
     if not niv_ok.empty and "error" in niv_ok.columns:
         niv_ok = niv_ok[niv_ok["error"].isna()]
 
-    # ── GUARDAR EN CACHÉ ───────────────────────────────────
-    result = (din_ok, niv_ok, col_map)
-    cache.set("indexes_ok", result, ttl=_SNAP_TTL)
-    return result
-    # ───────────────────────────────────────────────────────
+    return din_ok, niv_ok, col_map
 
 
 def _build_snap_con_coords(
@@ -110,12 +96,6 @@ def _build_snap_con_coords(
             PB, NM, NC, ND, PE, lat, lon, nivel_5, nombre_corto,
             Dias_desde_ultima, + todos los campos de EXTRA_FIELDS
     """
-    # ── CACHÉ ──────────────────────────────────────────────
-    cached = cache.get("snap_con_coords")
-    if cached is not None:
-        return cached.copy()
-    # ───────────────────────────────────────────────────────
-
     snap_map = build_last_snapshot_for_map(din_ok, niv_ok)
 
     if snap_map.empty:
@@ -181,10 +161,7 @@ def _build_snap_con_coords(
     if "nivel_5" in snap_map.columns:
         snap_map["nivel_5"] = snap_map["nivel_5"].astype("string").str.strip()
 
-    # ── GUARDAR EN CACHÉ ───────────────────────────────────
-    cache.set("snap_con_coords", snap_map, ttl=_SNAP_TTL)
-    return snap_map.copy()
-    # ───────────────────────────────────────────────────────
+    return snap_map
 
 
 def _apply_filtros(
@@ -269,12 +246,6 @@ async def get_baterias():
             "total": int
         }
     """
-    # ── CACHÉ ──────────────────────────────────────────────
-    cached = cache.get("baterias")
-    if cached is not None:
-        return cached
-    # ───────────────────────────────────────────────────────
-
     coords = load_coords_repo()
 
     if coords.empty or "nivel_5" not in coords.columns:
@@ -290,15 +261,10 @@ async def get_baterias():
     bat_counts.columns = ["nombre", "pozos"]
     bat_counts = bat_counts.sort_values("nombre")
 
-    result = {
+    return {
         "baterias": bat_counts.to_dict(orient="records"),
         "total":    len(bat_counts),
     }
-
-    # ── GUARDAR EN CACHÉ ───────────────────────────────────
-    cache.set("baterias", result, ttl=_BAT_TTL)
-    return result
-    # ───────────────────────────────────────────────────────
 
 
 # ==========================================================
@@ -322,6 +288,28 @@ async def get_puntos_mapa(
     """
     Devuelve los puntos del mapa de sumergencia para Deck.gl.
     Incluye todos los campos necesarios para el heatmap y los popups.
+
+    Query params:
+        baterias:        lista separada por coma (opcional)
+        sum_min/max:     rango de sumergencia
+        dias_min/max:    rango de días desde última medición
+        origen:          DIN | NIV (opcional)
+        solo_con_coords: True (default) → solo pozos georeferenciados
+        solo_validadas:  None=todos | True=validadas | False=no validadas
+
+    Returns:
+        {
+            "total":   int,
+            "puntos":  [
+                {
+                    NO_key, nivel_5, nombre_corto, ORIGEN,
+                    DT_plot_str, Sumergencia, Sumergencia_base,
+                    Dias_desde_ultima, lat, lon,
+                    PE, PB, NM, NC, ND,
+                    Bba_Llenado, SE, validada
+                }
+            ]
+        }
     """
     din_ok, niv_ok, _ = _load_indexes_ok()
     snap = _build_snap_con_coords(din_ok, niv_ok)
@@ -406,6 +394,26 @@ async def get_semaforo_aib_mapa(
     """
     Devuelve los puntos del mapa con estado del semáforo AIB.
     Solo incluye pozos con SE=AIB y coordenadas válidas.
+
+    Query params:
+        baterias:  lista separada por coma (opcional)
+        sum_media: umbral de sumergencia media (default 200m)
+        sum_alta:  umbral de sumergencia alta  (default 250m)
+        llen_ok:   llenado OK (default 70%)
+        llen_bajo: llenado bajo (default 50%)
+
+    Returns:
+        {
+            "total":   int,
+            "counts":  { total_aib, normal, alerta, critico, sin_datos, no_aplica },
+            "puntos":  [
+                {
+                    NO_key, nivel_5, lat, lon,
+                    Sumergencia, Bba_Llenado, SE,
+                    Semaforo_AIB, DT_plot_str, Dias_desde_ultima
+                }
+            ]
+        }
     """
     din_ok, niv_ok, _ = _load_indexes_ok()
     snap = _build_snap_con_coords(din_ok, niv_ok)
@@ -480,6 +488,21 @@ async def get_stats_mapa(
 ):
     """
     Devuelve estadísticas generales del mapa para los KPIs del dashboard.
+
+    Returns:
+        {
+            "kpis":    { total_pozos, ultima_din, ultima_niv, con_sumergencia, con_pb },
+            "calidad": { sum_negativa, pb_anomalo, pb_faltante, pb_low, pb_high },
+            "sumergencia": {
+                "media":   float | None,
+                "mediana": float | None,
+                "min":     float | None,
+                "max":     float | None,
+                "p25":     float | None,
+                "p75":     float | None,
+            },
+            "semaforo": { total_aib, normal, alerta, critico, sin_datos, no_aplica },
+        }
     """
     din_ok, niv_ok, _ = _load_indexes_ok()
     snap = _build_snap_con_coords(din_ok, niv_ok)

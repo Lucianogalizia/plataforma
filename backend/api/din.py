@@ -589,58 +589,55 @@ async def get_snapshot_mapa(
 
     m = cache.get("snap_con_coords")
     if m is None:
-
         snap_map = build_last_snapshot_for_map(din_ok, niv_ok)
 
         if snap_map.empty:
             return {"total": 0, "puntos": []}
 
-    snap_map["DT_plot"] = pd.to_datetime(snap_map["DT_plot"], errors="coerce")
-    snap_map = snap_map.dropna(subset=["DT_plot"])
+        snap_map["DT_plot"] = pd.to_datetime(snap_map["DT_plot"], errors="coerce")
+        snap_map = snap_map.dropna(subset=["DT_plot"])
 
-    now = pd.Timestamp.now()
-    snap_map["Dias_desde_ultima"] = (
-        (now - snap_map["DT_plot"]).dt.total_seconds() / 86400.0
-    )
-    snap_map["Sumergencia"] = pd.to_numeric(snap_map["Sumergencia"], errors="coerce")
-
-    # --- Merge coordenadas ---
-    coords = load_coords_repo()
-    if coords.empty:
-        raise HTTPException(
-            status_code=503,
-            detail="Excel de coordenadas no disponible"
+        now = pd.Timestamp.now()
+        snap_map["Dias_desde_ultima"] = (
+            (now - snap_map["DT_plot"]).dt.total_seconds() / 86400.0
         )
+        snap_map["Sumergencia"] = pd.to_numeric(snap_map["Sumergencia"], errors="coerce")
 
-    coords = coords.copy()
-    coords["NO_key"] = coords["nombre_corto"].apply(normalize_no_exact)
-    snap_map["NO_key"] = snap_map["NO_key"].apply(normalize_no_exact)
+        coords = load_coords_repo()
+        if coords.empty:
+            raise HTTPException(
+                status_code=503,
+                detail="Excel de coordenadas no disponible"
+            )
 
-    m = snap_map.merge(
-        coords[["NO_key", "nombre_corto", "nivel_5", "GEO_LATITUDE", "GEO_LONGITUDE"]],
-        on="NO_key",
-        how="left",
-    ).rename(columns={"GEO_LATITUDE": "lat", "GEO_LONGITUDE": "lon"})
+        coords = coords.copy()
+        coords["NO_key"] = coords["nombre_corto"].apply(normalize_no_exact)
+        snap_map["NO_key"] = snap_map["NO_key"].apply(normalize_no_exact)
 
-    m["lat"] = pd.to_numeric(m["lat"], errors="coerce")
-    m["lon"] = pd.to_numeric(m["lon"], errors="coerce")
+        m = snap_map.merge(
+            coords[["NO_key", "nombre_corto", "nivel_5", "GEO_LATITUDE", "GEO_LONGITUDE"]],
+            on="NO_key",
+            how="left",
+        ).rename(columns={"GEO_LATITUDE": "lat", "GEO_LONGITUDE": "lon"})
 
-   
-        # Solo con coordenadas válidas
+        m["lat"] = pd.to_numeric(m["lat"], errors="coerce")
+        m["lon"] = pd.to_numeric(m["lon"], errors="coerce")
+
         m = m[m["lat"].notna() & m["lon"].notna()].copy()
-        # Normalizar nivel_5
+
         if "nivel_5" in m.columns:
             m["nivel_5"] = m["nivel_5"].astype("string").str.strip()
+
         cache.set("snap_con_coords", m, ttl=_SNAP_TTL)
 
     # Filtros sobre copia
     m = m.copy()
 
-    # --- Filtros ---
     if baterias:
         bat_list = [b.strip() for b in baterias.split(",") if b.strip()]
         if bat_list and "nivel_5" in m.columns:
             m = m[m["nivel_5"].isin(bat_list)]
+
     if sum_min is not None:
         m = m[m["Sumergencia"].between(sum_min, float("inf"), inclusive="both")]
     if sum_max is not None:

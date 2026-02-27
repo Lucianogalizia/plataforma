@@ -54,11 +54,8 @@ from core.semaforo import (
     get_pozos_por_mes,
     get_cobertura_din_niv,
 )
-from core.cache import cache  # ← AGREGADO
 
 router = APIRouter()
-
-_SNAP_TTL = 600  # 10 minutos  ← AGREGADO
 
 
 # ==========================================================
@@ -73,12 +70,6 @@ def _load_indexes_with_keys():
     Returns:
         (din_ok, niv_ok, col_map)
     """
-    # ── CACHÉ ──────────────────────────────────────────────
-    cached = cache.get("indexes_with_keys")
-    if cached is not None:
-        return cached
-    # ───────────────────────────────────────────────────────
-
     df_din = load_din_index()
     df_niv = load_niv_index()
 
@@ -100,11 +91,7 @@ def _load_indexes_with_keys():
     if not niv_ok.empty and "error" in niv_ok.columns:
         niv_ok = niv_ok[niv_ok["error"].isna()]
 
-    # ── GUARDAR EN CACHÉ ───────────────────────────────────
-    result = (din_ok, niv_ok, col_map)
-    cache.set("indexes_with_keys", result, ttl=_SNAP_TTL)
-    return result
-    # ───────────────────────────────────────────────────────
+    return din_ok, niv_ok, col_map
 
 
 def _df_to_records(df: pd.DataFrame) -> list[dict]:
@@ -440,104 +427,109 @@ async def get_snapshot(
     """
     Devuelve el snapshot global: última medición por pozo.
     Incluye extras del snapshot pregenerado por build_snapshot.py.
+
+    Query params:
+        origen:  "DIN" | "NIV" (opcional)
+        sum_min / sum_max: rango de Sumergencia
+        est_min / est_max: rango de %Estructura
+        bal_min / bal_max: rango de %Balance
+
+    Returns:
+        {
+            "total":  int,
+            "snap":   [...],
+            "kpis":   { total_pozos, ultima_din, ultima_niv, con_sumergencia, con_pb }
+        }
     """
     din_ok, niv_ok, col_map = _load_indexes_with_keys()
 
-    # ── CACHÉ snapshot base ────────────────────────────────
-    snap = cache.get("snapshot_global")
-    if snap is None:
-        snap = build_global_consolidated(
-            din_ok, niv_ok,
-            col_map["din_no_col"], col_map["din_fe_col"], col_map["din_ho_col"],
-            col_map["niv_no_col"], col_map["niv_fe_col"], col_map["niv_ho_col"],
-        )
-
-        if not snap.empty:
-            snap["DT_plot"] = pd.to_datetime(snap["DT_plot"], errors="coerce")
-            snap = (
-                snap.sort_values(["NO_key", "DT_plot"], na_position="last")
-                .dropna(subset=["DT_plot"])
-                .groupby("NO_key", as_index=False)
-                .tail(1)
-                .copy()
-            )
-
-            # --- Merge con snapshot pregenerado (extras nocturnos) ---
-            snap_pre = load_snapshot()
-            if not snap_pre.empty and "NO_key" in snap_pre.columns:
-                extra_cols = [c for c in EXTRA_FIELDS if c in snap_pre.columns]
-                if extra_cols:
-                    snap_pre_slim = snap_pre[["NO_key"] + extra_cols].drop_duplicates("NO_key")
-                    snap = snap.merge(snap_pre_slim, on="NO_key", how="left", suffixes=("", "_pre"))
-                    for c in extra_cols:
-                        c_pre = f"{c}_pre"
-                        if c_pre in snap.columns:
-                            snap[c] = snap[c_pre].combine_first(snap[c])
-                            snap = snap.drop(columns=[c_pre])
-
-            for c in EXTRA_FIELDS:
-                if c not in snap.columns:
-                    snap[c] = None
-
-            # --- Antigüedad ---
-            now = pd.Timestamp.now()
-            snap["Dias_desde_ultima"] = (
-                (now - snap["DT_plot"]).dt.total_seconds() / 86400.0
-            )
-
-            # --- Merge con Batería ---
-            coords = load_coords_repo()
-            if (
-                not coords.empty
-                and "nombre_corto" in coords.columns
-                and "nivel_5" in coords.columns
-            ):
-                coords_bat = coords[["nombre_corto", "nivel_5"]].copy()
-                coords_bat["NO_key"] = coords_bat["nombre_corto"].apply(normalize_no_exact)
-                coords_bat = coords_bat.drop_duplicates(subset=["NO_key"])
-                snap = snap.merge(
-                    coords_bat[["NO_key", "nivel_5"]].rename(columns={"nivel_5": "Bateria"}),
-                    on="NO_key",
-                    how="left",
-                )
-            else:
-                snap["Bateria"] = None
-
-        cache.set("snapshot_global", snap, ttl=_SNAP_TTL)
-    # ───────────────────────────────────────────────────────
+    snap = build_global_consolidated(
+        din_ok, niv_ok,
+        col_map["din_no_col"], col_map["din_fe_col"], col_map["din_ho_col"],
+        col_map["niv_no_col"], col_map["niv_fe_col"], col_map["niv_ho_col"],
+    )
 
     if snap.empty:
         return {"total": 0, "snap": [], "kpis": {}}
 
-    # Aplicar filtros sobre copia
-    s = snap.copy()
+    snap["DT_plot"] = pd.to_datetime(snap["DT_plot"], errors="coerce")
+    snap = (
+        snap.sort_values(["NO_key", "DT_plot"], na_position="last")
+        .dropna(subset=["DT_plot"])
+        .groupby("NO_key", as_index=False)
+        .tail(1)
+        .copy()
+    )
+
+    # --- Merge con snapshot pregenerado (extras nocturnos) ---
+    snap_pre = load_snapshot()
+    if not snap_pre.empty and "NO_key" in snap_pre.columns:
+        extra_cols = [c for c in EXTRA_FIELDS if c in snap_pre.columns]
+        if extra_cols:
+            snap_pre_slim = snap_pre[["NO_key"] + extra_cols].drop_duplicates("NO_key")
+            snap = snap.merge(snap_pre_slim, on="NO_key", how="left", suffixes=("", "_pre"))
+            for c in extra_cols:
+                c_pre = f"{c}_pre"
+                if c_pre in snap.columns:
+                    snap[c] = snap[c_pre].combine_first(snap[c])
+                    snap = snap.drop(columns=[c_pre])
+
+    for c in EXTRA_FIELDS:
+        if c not in snap.columns:
+            snap[c] = None
+
+    # --- Antigüedad ---
+    now = pd.Timestamp.now()
+    snap["Dias_desde_ultima"] = (
+        (now - snap["DT_plot"]).dt.total_seconds() / 86400.0
+    )
+
+    # --- Merge con Batería ---
+    coords = load_coords_repo()
+    if (
+        not coords.empty
+        and "nombre_corto" in coords.columns
+        and "nivel_5" in coords.columns
+    ):
+        coords_bat = coords[["nombre_corto", "nivel_5"]].copy()
+        coords_bat["NO_key"] = coords_bat["nombre_corto"].apply(normalize_no_exact)
+        coords_bat = coords_bat.drop_duplicates(subset=["NO_key"])
+        snap = snap.merge(
+            coords_bat[["NO_key", "nivel_5"]].rename(columns={"nivel_5": "Bateria"}),
+            on="NO_key",
+            how="left",
+        )
+    else:
+        snap["Bateria"] = None
+
+    # --- Filtros ---
     if origen:
-        s = s[s["ORIGEN"] == origen.upper()]
+        snap = snap[snap["ORIGEN"] == origen.upper()]
     if sum_min is not None:
-        s = s[s["Sumergencia"].isna() | (s["Sumergencia"] >= sum_min)]
+        snap = snap[snap["Sumergencia"].isna() | (snap["Sumergencia"] >= sum_min)]
     if sum_max is not None:
-        s = s[s["Sumergencia"].isna() | (s["Sumergencia"] <= sum_max)]
+        snap = snap[snap["Sumergencia"].isna() | (snap["Sumergencia"] <= sum_max)]
     if est_min is not None:
-        s = s[s["%Estructura"].isna() | (s["%Estructura"] >= est_min)]
+        snap = snap[snap["%Estructura"].isna() | (snap["%Estructura"] >= est_min)]
     if est_max is not None:
-        s = s[s["%Estructura"].isna() | (s["%Estructura"] <= est_max)]
+        snap = snap[snap["%Estructura"].isna() | (snap["%Estructura"] <= est_max)]
     if bal_min is not None:
-        s = s[s["%Balance"].isna() | (s["%Balance"] >= bal_min)]
+        snap = snap[snap["%Balance"].isna() | (snap["%Balance"] >= bal_min)]
     if bal_max is not None:
-        s = s[s["%Balance"].isna() | (s["%Balance"] <= bal_max)]
+        snap = snap[snap["%Balance"].isna() | (snap["%Balance"] <= bal_max)]
 
     # --- KPIs ---
     kpis = {
-        "total_pozos":     len(s),
-        "ultima_din":      int((s["ORIGEN"] == "DIN").sum()) if "ORIGEN" in s.columns else 0,
-        "ultima_niv":      int((s["ORIGEN"] == "NIV").sum()) if "ORIGEN" in s.columns else 0,
-        "con_sumergencia": int(s["Sumergencia"].notna().sum()) if "Sumergencia" in s.columns else 0,
-        "con_pb":          int(s["PB"].notna().sum()) if "PB" in s.columns else 0,
+        "total_pozos":     len(snap),
+        "ultima_din":      int((snap["ORIGEN"] == "DIN").sum()) if "ORIGEN" in snap.columns else 0,
+        "ultima_niv":      int((snap["ORIGEN"] == "NIV").sum()) if "ORIGEN" in snap.columns else 0,
+        "con_sumergencia": int(snap["Sumergencia"].notna().sum()) if "Sumergencia" in snap.columns else 0,
+        "con_pb":          int(snap["PB"].notna().sum()) if "PB" in snap.columns else 0,
     }
 
     return {
-        "total": len(s),
-        "snap":  _df_to_records(s),
+        "total": len(snap),
+        "snap":  _df_to_records(snap),
         "kpis":  kpis,
     }
 
@@ -561,53 +553,74 @@ async def get_snapshot_mapa(
     Devuelve el snapshot para el mapa de sumergencia.
     Incluye coordenadas lat/lon y Batería.
     Listo para renderizar con Deck.gl en el frontend.
+
+    Query params:
+        sum_min / sum_max:  rango de Sumergencia
+        dias_min / dias_max: rango de días desde última medición
+        baterias: lista de baterías separadas por coma
+
+    Returns:
+        {
+            "total":  int,
+            "puntos": [
+                {
+                    "NO_key":           str,
+                    "nivel_5":          str,
+                    "ORIGEN":           str,
+                    "DT_plot_str":      str,
+                    "Sumergencia":      float,
+                    "Dias_desde_ultima":float,
+                    "lat":              float,
+                    "lon":              float,
+                }
+            ]
+        }
     """
     din_ok, niv_ok, _ = _load_indexes_with_keys()
 
-    # ── CACHÉ snapshot mapa base (compartido con mapa.py) ──
-    m = cache.get("snap_con_coords")
-    if m is None:
-        snap_map = build_last_snapshot_for_map(din_ok, niv_ok)
+    snap_map = build_last_snapshot_for_map(din_ok, niv_ok)
 
-        if snap_map.empty:
-            return {"total": 0, "puntos": []}
+    if snap_map.empty:
+        return {"total": 0, "puntos": []}
 
-        snap_map["DT_plot"] = pd.to_datetime(snap_map["DT_plot"], errors="coerce")
-        snap_map = snap_map.dropna(subset=["DT_plot"])
+    snap_map["DT_plot"] = pd.to_datetime(snap_map["DT_plot"], errors="coerce")
+    snap_map = snap_map.dropna(subset=["DT_plot"])
 
-        now = pd.Timestamp.now()
-        snap_map["Dias_desde_ultima"] = (
-            (now - snap_map["DT_plot"]).dt.total_seconds() / 86400.0
+    now = pd.Timestamp.now()
+    snap_map["Dias_desde_ultima"] = (
+        (now - snap_map["DT_plot"]).dt.total_seconds() / 86400.0
+    )
+    snap_map["Sumergencia"] = pd.to_numeric(snap_map["Sumergencia"], errors="coerce")
+
+    # --- Merge coordenadas ---
+    coords = load_coords_repo()
+    if coords.empty:
+        raise HTTPException(
+            status_code=503,
+            detail="Excel de coordenadas no disponible"
         )
-        snap_map["Sumergencia"] = pd.to_numeric(snap_map["Sumergencia"], errors="coerce")
 
-        coords = load_coords_repo()
-        if coords.empty:
-            raise HTTPException(status_code=503, detail="Excel de coordenadas no disponible")
+    coords = coords.copy()
+    coords["NO_key"] = coords["nombre_corto"].apply(normalize_no_exact)
+    snap_map["NO_key"] = snap_map["NO_key"].apply(normalize_no_exact)
 
-        coords = coords.copy()
-        coords["NO_key"] = coords["nombre_corto"].apply(normalize_no_exact)
-        snap_map["NO_key"] = snap_map["NO_key"].apply(normalize_no_exact)
+    m = snap_map.merge(
+        coords[["NO_key", "nombre_corto", "nivel_5", "GEO_LATITUDE", "GEO_LONGITUDE"]],
+        on="NO_key",
+        how="left",
+    ).rename(columns={"GEO_LATITUDE": "lat", "GEO_LONGITUDE": "lon"})
 
-        m = snap_map.merge(
-            coords[["NO_key", "nombre_corto", "nivel_5", "GEO_LATITUDE", "GEO_LONGITUDE"]],
-            on="NO_key",
-            how="left",
-        ).rename(columns={"GEO_LATITUDE": "lat", "GEO_LONGITUDE": "lon"})
+    m["lat"] = pd.to_numeric(m["lat"], errors="coerce")
+    m["lon"] = pd.to_numeric(m["lon"], errors="coerce")
 
-        m["lat"] = pd.to_numeric(m["lat"], errors="coerce")
-        m["lon"] = pd.to_numeric(m["lon"], errors="coerce")
+    # Solo con coordenadas válidas
+    m = m[m["lat"].notna() & m["lon"].notna()].copy()
 
-        if "nivel_5" in m.columns:
-            m["nivel_5"] = m["nivel_5"].astype("string").str.strip()
+    # Normalizar nivel_5
+    if "nivel_5" in m.columns:
+        m["nivel_5"] = m["nivel_5"].astype("string").str.strip()
 
-        cache.set("snap_con_coords", m, ttl=_SNAP_TTL)
-    # ───────────────────────────────────────────────────────
-
-    # Filtros sobre copia
-    m = m.copy()
-    m = m[m["lat"].notna() & m["lon"].notna()]
-
+    # --- Filtros ---
     if baterias:
         bat_list = [b.strip() for b in baterias.split(",") if b.strip()]
         if bat_list and "nivel_5" in m.columns:
@@ -658,6 +671,29 @@ async def get_tendencias(
 ):
     """
     Calcula la tendencia lineal por mes de una variable para todos los pozos.
+
+    Query params:
+        variable:       nombre de la columna (Sumergencia, PB, %Balance, etc.)
+        min_pts:        mínimo de puntos para calcular (default 4)
+        solo_positiva:  si True, devuelve solo pendiente > 0 (default True)
+        top:            máximo de pozos en el resultado (default 30)
+
+    Returns:
+        {
+            "variable": str,
+            "pozos":    [
+                {
+                    "NO_key":             str,
+                    "n_puntos":           int,
+                    "pendiente_por_mes":  float,
+                    "valor_inicial":      float,
+                    "valor_final":        float,
+                    "delta_total":        float,
+                    "fecha_inicial":      str,
+                    "fecha_final":        str,
+                }
+            ]
+        }
     """
     din_ok, niv_ok, col_map = _load_indexes_with_keys()
 
@@ -722,6 +758,13 @@ async def get_tendencias(
 async def get_pozos_por_mes_endpoint():
     """
     Devuelve la cantidad de pozos únicos medidos por mes.
+
+    Returns:
+        {
+            "ultimo_mes":   str,
+            "ultimo_valor": int,
+            "serie":        [{"Mes": str, "Pozos_medidos": int}]
+        }
     """
     din_ok, niv_ok, col_map = _load_indexes_with_keys()
 
@@ -762,6 +805,19 @@ async def get_cobertura(
 ):
     """
     Calcula la cobertura DIN vs NIV en una ventana de fechas.
+
+    Query params:
+        fecha_desde: YYYY-MM-DD
+        fecha_hasta: YYYY-MM-DD
+        modo:        "historico" | "snapshot"
+
+    Returns:
+        {
+            "total_pozos":      int,
+            "pozos_con_din":    int,
+            "pozos_sin_din":    int,
+            "lista_sin_din":    [str, ...]
+        }
     """
     din_ok, niv_ok, col_map = _load_indexes_with_keys()
 

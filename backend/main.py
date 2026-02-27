@@ -91,14 +91,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"  GCS Client:  ❌ Error: {e}")
 
-    print(f"  Índices:     ⏳ Se cargarán en el primer request")
-
     try:
         from ia.diagnostico import get_openai_key
         key = get_openai_key()
         print(f"  OpenAI Key:  {'✅ Configurada' if key else '⚠️  No encontrada'}")
     except Exception as e:
         print(f"  OpenAI Key:  ❌ Error: {e}")
+
+    # Precalentar caché
+    try:
+        from api.din import _load_indexes_with_keys
+        from api.mapa import _build_snap_con_coords
+        print("  Caché:       ⏳ Precalentando índices y snapshot...")
+        din_ok, niv_ok, _ = _load_indexes_with_keys()
+        _build_snap_con_coords(din_ok, niv_ok)
+        print("  Caché:       ✅ Listo")
+    except Exception as e:
+        print(f"  Caché:       ⚠️  Error precalentando: {e}")
 
     print(f"  CORS Origins: {CORS_ORIGINS}")
     print("=" * 60)

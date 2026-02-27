@@ -54,8 +54,11 @@ from core.semaforo import (
     get_pozos_por_mes,
     get_cobertura_din_niv,
 )
+from core.cache import cache
 
 router = APIRouter()
+
+_SNAP_TTL = 600
 
 
 # ==========================================================
@@ -70,6 +73,10 @@ def _load_indexes_with_keys():
     Returns:
         (din_ok, niv_ok, col_map)
     """
+    cached = cache.get("indexes_with_keys")
+    if cached is not None:
+        return cached
+
     df_din = load_din_index()
     df_niv = load_niv_index()
 
@@ -91,7 +98,9 @@ def _load_indexes_with_keys():
     if not niv_ok.empty and "error" in niv_ok.columns:
         niv_ok = niv_ok[niv_ok["error"].isna()]
 
-    return din_ok, niv_ok, col_map
+    result = (din_ok, niv_ok, col_map)
+    cache.set("indexes_with_keys", result, ttl=_SNAP_TTL)
+    return result
 
 
 def _df_to_records(df: pd.DataFrame) -> list[dict]:
@@ -578,10 +587,13 @@ async def get_snapshot_mapa(
     """
     din_ok, niv_ok, _ = _load_indexes_with_keys()
 
-    snap_map = build_last_snapshot_for_map(din_ok, niv_ok)
+    m = cache.get("snap_con_coords")
+    if m is None:
 
-    if snap_map.empty:
-        return {"total": 0, "puntos": []}
+        snap_map = build_last_snapshot_for_map(din_ok, niv_ok)
+
+        if snap_map.empty:
+            return {"total": 0, "puntos": []}
 
     snap_map["DT_plot"] = pd.to_datetime(snap_map["DT_plot"], errors="coerce")
     snap_map = snap_map.dropna(subset=["DT_plot"])
@@ -613,12 +625,19 @@ async def get_snapshot_mapa(
     m["lat"] = pd.to_numeric(m["lat"], errors="coerce")
     m["lon"] = pd.to_numeric(m["lon"], errors="coerce")
 
+   
     # Solo con coordenadas válidas
-    m = m[m["lat"].notna() & m["lon"].notna()].copy()
+        m = m[m["lat"].notna() & m["lon"].notna()].copy()
 
-    # Normalizar nivel_5
-    if "nivel_5" in m.columns:
-        m["nivel_5"] = m["nivel_5"].astype("string").str.strip()
+        # Normalizar nivel_5
+        if "nivel_5" in m.columns:
+            m["nivel_5"] = m["nivel_5"].astype("string").str.strip()
+
+        cache.set("snap_con_coords", m, ttl=_SNAP_TTL)
+
+    m = m.copy()
+
+    
 
     # --- Filtros ---
     if baterias:

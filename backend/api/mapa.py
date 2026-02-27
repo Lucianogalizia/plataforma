@@ -46,8 +46,12 @@ from core.validaciones import (
     make_fecha_key,
     get_validacion,
 )
+from core.cache import cache
 
 router = APIRouter()
+
+_SNAP_TTL = 600
+_BAT_TTL  = 1800
 
 
 # ==========================================================
@@ -61,6 +65,10 @@ def _load_indexes_ok():
     Returns:
         (din_ok, niv_ok, col_map)
     """
+    cached = cache.get("indexes_ok")
+    if cached is not None:
+        return cached
+
     df_din = load_din_index()
     df_niv = load_niv_index()
 
@@ -79,8 +87,9 @@ def _load_indexes_ok():
     if not niv_ok.empty and "error" in niv_ok.columns:
         niv_ok = niv_ok[niv_ok["error"].isna()]
 
-    return din_ok, niv_ok, col_map
-
+    result = (din_ok, niv_ok, col_map)
+    cache.set("indexes_ok", result, ttl=_SNAP_TTL)
+    return result
 
 def _build_snap_con_coords(
     din_ok: pd.DataFrame,
@@ -96,6 +105,10 @@ def _build_snap_con_coords(
             PB, NM, NC, ND, PE, lat, lon, nivel_5, nombre_corto,
             Dias_desde_ultima, + todos los campos de EXTRA_FIELDS
     """
+    cached = cache.get("snap_con_coords")
+    if cached is not None:
+        return cached.copy()
+
     snap_map = build_last_snapshot_for_map(din_ok, niv_ok)
 
     if snap_map.empty:
@@ -161,7 +174,8 @@ def _build_snap_con_coords(
     if "nivel_5" in snap_map.columns:
         snap_map["nivel_5"] = snap_map["nivel_5"].astype("string").str.strip()
 
-    return snap_map
+    cache.set("snap_con_coords", snap_map, ttl=_SNAP_TTL)
+    return snap_map.copy()
 
 
 def _apply_filtros(
@@ -246,6 +260,10 @@ async def get_baterias():
             "total": int
         }
     """
+    cached = cache.get("baterias")
+    if cached is not None:
+        return cached
+
     coords = load_coords_repo()
 
     if coords.empty or "nivel_5" not in coords.columns:
@@ -261,10 +279,12 @@ async def get_baterias():
     bat_counts.columns = ["nombre", "pozos"]
     bat_counts = bat_counts.sort_values("nombre")
 
-    return {
+    result = {
         "baterias": bat_counts.to_dict(orient="records"),
         "total":    len(bat_counts),
     }
+    cache.set("baterias", result, ttl=_BAT_TTL)
+    return result
 
 
 # ==========================================================

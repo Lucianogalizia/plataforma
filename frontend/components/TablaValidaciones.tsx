@@ -1,69 +1,99 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import api, { PuntoMapa, FilaValidacion } from "@/lib/api";
+import api, { PuntoMapa } from "@/lib/api";
 
 interface TablaValidacionesProps {
   pozos: PuntoMapa[];
 }
 
-const SORT_COLS: { key: keyof FilaValidacion; label: string }[] = [
-  { key: "pozo",              label: "Pozo" },
-  { key: "bateria",           label: "Batería" },
-  { key: "fecha_medicion",    label: "Fecha" },
-  { key: "Dias_desde_ultima", label: "Días" },
-  { key: "sumergencia_m",     label: "Sumergencia" },
-  { key: "base",              label: "Base" },
-  { key: "comentario",        label: "Comentario" },
+interface RowState {
+  no_key: string;
+  bateria: string;
+  fecha_medicion: string;
+  dias: number | null;
+  sumergencia: number | null;
+  base: string;
+  validada: boolean;
+  comentario: string;
+  fecha_key: string;
+}
+
+const SORT_COLS: { key: keyof RowState; label: string }[] = [
+  { key: "no_key",        label: "Pozo" },
+  { key: "bateria",       label: "Batería" },
+  { key: "fecha_medicion",label: "Fecha" },
+  { key: "dias",          label: "Días" },
+  { key: "sumergencia",   label: "Sumergencia" },
+  { key: "base",          label: "Base" },
+  { key: "comentario",    label: "Comentario" },
 ];
 
-export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
-  const [filas, setFilas]       = useState<FilaValidacion[]>([]);
-  const [loading, setLoading]   = useState(false);
-  const [saving, setSaving]     = useState<Record<number, boolean>>({});
-  const [saved, setSaved]       = useState<Record<number, boolean>>({});
-  const [usuario, setUsuario]   = useState("");
-  const [editIdx, setEditIdx]   = useState<number | null>(null);
-  const [editComentario, setEditComentario] = useState("");
-  const [sortKey, setSortKey]   = useState<keyof FilaValidacion | null>(null);
-  const [sortAsc, setSortAsc]   = useState(true);
+function pozosToRows(pozos: PuntoMapa[]): RowState[] {
+  return pozos.map((p) => ({
+    no_key:         p.NO_key,
+    bateria:        p.nivel_5 || "",
+    fecha_medicion: p.DT_plot_str || "",
+    dias:           p.Dias_desde_ultima ?? null,
+    sumergencia:    p.Sumergencia ?? null,
+    base:           p.Sumergencia_base || "",
+    validada:       true,
+    comentario:     "",
+    fecha_key:      p.DT_plot_str || "",
+  }));
+}
 
-  // Cargar validaciones desde el backend al montar o cuando cambian los pozos
+export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
+  const [rows, setRows]       = useState<RowState[]>(() => pozosToRows(pozos));
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving]   = useState<Record<number, boolean>>({});
+  const [saved, setSaved]     = useState<Record<number, boolean>>({});
+  const [usuario, setUsuario] = useState("");
+  const [editIdx, setEditIdx] = useState<number | null>(null);
+  const [editComentario, setEditComentario] = useState("");
+  const [sortKey, setSortKey] = useState<keyof RowState | null>(null);
+  const [sortAsc, setSortAsc] = useState(true);
+
+  // Cuando cambian los pozos: inicializar filas y cargar validaciones guardadas
   useEffect(() => {
     if (!pozos.length) return;
-    setLoading(true);
+
+    // Primero mostrar filas inmediatamente con datos del snapshot
+    const base = pozosToRows(pozos);
+    setRows(base);
     setEditIdx(null);
-    api.getTablaValidaciones()
-      .then((res) => {
-        // Filtrar solo los pozos que están en la lista actual
-        const noKeys = new Set(pozos.map((p) => p.NO_key));
-        const filtradas = res.filas.filter((f) => noKeys.has(f.pozo));
-        setFilas(filtradas);
-      })
-      .catch(() => {
-        // Fallback: construir filas básicas desde los puntos sin comentarios
-        setFilas(pozos.map((p) => ({
-          validada:         true,
-          pozo:             p.NO_key,
-          bateria:          p.nivel_5 || "",
-          fecha_medicion:   p.DT_plot_str || "",
-          sumergencia_m:    p.Sumergencia ?? null,
-          base:             "",
-          comentario:       "",
-          usuario:          "",
-          _no_key:          p.NO_key,
-          _fecha_key:       p.DT_plot_str || "",
-          lat:              p.lat,
-          lon:              p.lon,
-          Dias_desde_ultima: p.Dias_desde_ultima ?? null,
-        })));
-      })
-      .finally(() => setLoading(false));
+    setLoading(true);
+
+    // Luego cargar validaciones guardadas pozo por pozo (solo los visibles)
+    Promise.allSettled(
+      pozos.map((p) => api.getValidaciones(p.NO_key))
+    ).then((results) => {
+      setRows((prev) => {
+        const next = [...prev];
+        results.forEach((result, i) => {
+          if (result.status !== "fulfilled") return;
+          const data = result.value;
+          const mediciones = data.mediciones || {};
+          const fecha_key = pozos[i].DT_plot_str || "";
+          // Buscar la medición que coincide con la fecha
+          const med = mediciones[fecha_key];
+          if (med) {
+            next[i] = {
+              ...next[i],
+              validada:   med.validada  ?? true,
+              comentario: med.comentario ?? "",
+            };
+          }
+        });
+        return next;
+      });
+    }).finally(() => setLoading(false));
+
   }, [pozos]);
 
   const sorted = useMemo(() => {
-    if (!sortKey) return filas;
-    return [...filas].sort((a, b) => {
+    if (!sortKey) return rows;
+    return [...rows].sort((a, b) => {
       const av = a[sortKey];
       const bv = b[sortKey];
       if (av == null && bv == null) return 0;
@@ -75,29 +105,28 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
         ? String(av).localeCompare(String(bv))
         : String(bv).localeCompare(String(av));
     });
-  }, [filas, sortKey, sortAsc]);
+  }, [rows, sortKey, sortAsc]);
 
-  function handleSort(key: keyof FilaValidacion) {
+  function handleSort(key: keyof RowState) {
     if (sortKey === key) setSortAsc((a) => !a);
     else { setSortKey(key); setSortAsc(true); }
   }
 
   const handleCheckbox = async (sortedIdx: number, valida: boolean) => {
     const r = sorted[sortedIdx];
-    const realIdx = filas.indexOf(r);
-    // Actualizar local inmediatamente
-    setFilas((prev) => {
+    const realIdx = rows.findIndex((x) => x.no_key === r.no_key);
+    setRows((prev) => {
       const n = [...prev];
       n[realIdx] = { ...n[realIdx], validada: valida };
       return n;
     });
     setSaving((p) => ({ ...p, [sortedIdx]: true }));
     try {
-      await api.saveValidacion(r._no_key, {
-        fecha_key: r._fecha_key,
-        validada:  valida,
+      await api.saveValidacion(r.no_key, {
+        fecha_key:  r.fecha_key,
+        validada:   valida,
         comentario: r.comentario,
-        usuario:   usuario || "anónimo",
+        usuario:    usuario || "anónimo",
       });
       setSaved((p) => ({ ...p, [sortedIdx]: true }));
       setTimeout(() => setSaved((p) => ({ ...p, [sortedIdx]: false })), 2000);
@@ -107,17 +136,16 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
 
   const handleGuardarComentario = async (sortedIdx: number) => {
     const r = sorted[sortedIdx];
-    const realIdx = filas.indexOf(r);
+    const realIdx = rows.findIndex((x) => x.no_key === r.no_key);
     setSaving((p) => ({ ...p, [sortedIdx]: true }));
     try {
-      await api.saveValidacion(r._no_key, {
-        fecha_key:  r._fecha_key,
+      await api.saveValidacion(r.no_key, {
+        fecha_key:  r.fecha_key,
         validada:   r.validada,
         comentario: editComentario,
         usuario:    usuario || "anónimo",
       });
-      // Actualizar local con el comentario guardado
-      setFilas((prev) => {
+      setRows((prev) => {
         const n = [...prev];
         n[realIdx] = { ...n[realIdx], comentario: editComentario };
         return n;
@@ -130,9 +158,9 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
   };
 
   const exportCSV = () => {
-    const cols = ["pozo","bateria","fecha_medicion","Dias_desde_ultima","sumergencia_m","base","validada","comentario","usuario"];
+    const cols = ["no_key","bateria","fecha_medicion","dias","sumergencia","base","validada","comentario"];
     const header = cols.join(",");
-    const body = filas.map((r) =>
+    const body = rows.map((r) =>
       cols.map((c) => JSON.stringify((r as any)[c] ?? "")).join(",")
     );
     const a = document.createElement("a");
@@ -140,10 +168,6 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
     a.download = "pozos_validaciones.csv";
     a.click();
   };
-
-  if (loading) {
-    return <p className="text-slate-500 text-sm animate-pulse">Cargando validaciones…</p>;
-  }
 
   return (
     <div className="space-y-4">
@@ -161,7 +185,9 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
             ✕ orden
           </button>
         )}
-        <span className="text-xs text-slate-500 ml-auto">{filas.length} pozos</span>
+        <span className="text-xs text-slate-500 ml-auto">
+          {rows.length} pozos{loading ? " — cargando comentarios…" : ""}
+        </span>
       </div>
 
       <div className="card p-0 overflow-hidden">
@@ -182,7 +208,7 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
             </thead>
             <tbody>
               {sorted.map((r, i) => (
-                <tr key={`${r._no_key}-${i}`} className="border-b border-[#334155] hover:bg-slate-800/40">
+                <tr key={`${r.no_key}-${i}`} className="border-b border-[#334155] hover:bg-slate-800/40">
                   <td className="px-3 py-2 text-center">
                     {saving[i] ? <span className="text-xs text-slate-500">…</span>
                     : saved[i]  ? <span className="text-green-400 text-xs">✓</span>
@@ -190,14 +216,14 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
                         onChange={(e) => handleCheckbox(i, e.target.checked)}
                         className="accent-sky-400 w-4 h-4 cursor-pointer" />}
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs text-slate-300">{r.pozo}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-slate-300">{r.no_key}</td>
                   <td className="px-3 py-2 text-xs text-slate-400">{r.bateria || "—"}</td>
                   <td className="px-3 py-2 text-xs text-slate-400">{r.fecha_medicion || "—"}</td>
                   <td className="px-3 py-2 text-xs text-slate-400">
-                    {r.Dias_desde_ultima != null ? Number(r.Dias_desde_ultima).toFixed(0) : "—"}
+                    {r.dias != null ? Number(r.dias).toFixed(0) : "—"}
                   </td>
                   <td className="px-3 py-2 text-xs font-semibold text-sky-300">
-                    {r.sumergencia_m != null ? r.sumergencia_m.toFixed(1) : "—"}
+                    {r.sumergencia != null ? r.sumergencia.toFixed(1) : "—"}
                   </td>
                   <td className="px-3 py-2 text-xs text-slate-400">{r.base || "—"}</td>
                   <td className="px-3 py-2 text-xs min-w-[180px]">

@@ -626,25 +626,21 @@ async def get_snapshot_mapa(
     m["lon"] = pd.to_numeric(m["lon"], errors="coerce")
 
    
-    # Solo con coordenadas válidas
+        # Solo con coordenadas válidas
         m = m[m["lat"].notna() & m["lon"].notna()].copy()
-
         # Normalizar nivel_5
         if "nivel_5" in m.columns:
             m["nivel_5"] = m["nivel_5"].astype("string").str.strip()
-
         cache.set("snap_con_coords", m, ttl=_SNAP_TTL)
 
+    # Filtros sobre copia
     m = m.copy()
-
-    
 
     # --- Filtros ---
     if baterias:
         bat_list = [b.strip() for b in baterias.split(",") if b.strip()]
         if bat_list and "nivel_5" in m.columns:
             m = m[m["nivel_5"].isin(bat_list)]
-
     if sum_min is not None:
         m = m[m["Sumergencia"].between(sum_min, float("inf"), inclusive="both")]
     if sum_max is not None:

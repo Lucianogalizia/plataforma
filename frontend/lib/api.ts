@@ -462,7 +462,7 @@ export const api = {
     ),
 
   getHistorialValidaciones: (pozos: string) =>
-    apiFetch<{ total: number; historial: { no_key: string; fecha_key: string; validada: boolean; comentario: string }[] }>(
+    apiFetch<{ total: number; historial: Record<string, unknown>[] }>(
       `/api/validaciones/historial?pozos=${encodeURIComponent(pozos)}`
     ),
 

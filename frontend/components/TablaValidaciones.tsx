@@ -73,8 +73,8 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
           if (item.Tipo !== "ESTADO_ACTUAL") continue;
           const key = `${item.Pozo}||${item.Fecha}`;
           valMap[key] = {
-            validada:   item.Validada  ?? true,
-            comentario: item.Comentario ?? "",
+            validada:   (item.Validada as boolean) ?? true,
+            comentario: (item.Comentario as string) ?? "",
           };
         }
       

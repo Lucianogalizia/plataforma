@@ -498,6 +498,37 @@ export const api = {
   },
 
   // ==========================================================
+  // DIAGNÓSTICOS
+  // ==========================================================
+  getDiagnostico: (pozo: string) =>
+    apiGetCached<Diagnostico>(`/api/diagnosticos/${encodeURIComponent(pozo)}`),
+
+  generarDiagnostico: (pozo: string) =>
+    apiFetch<Diagnostico>(`/api/diagnosticos/${encodeURIComponent(pozo)}/generar`, {
+      method: "POST",
+    }),
+
+  getTablaGlobalDiag: () =>
+    apiGetCached<{ total: number; rows: FilaDiagGlobal[] }>("/api/diagnosticos/tabla-global"),
+
+  getEstadoCache: () =>
+    apiGetCached<{
+      total_pozos_con_din: number;
+      con_diagnostico: number;
+      pendientes: number;
+    }>("/api/diagnosticos/estado-cache"),
+
+  generarTodos: (body: { solo_pendientes?: boolean }) =>
+    apiFetch<{ ok: string[]; error: unknown[]; salteados: string[] }>(
+      "/api/diagnosticos/generar-todos",
+      { method: "POST", body: JSON.stringify(body) }
+    ),
+
+  // ==========================================================
+  // SISTEMA
+  // ==========================================================
+  
+  // ==========================================================
   // SISTEMA
   // ==========================================================
   getHealth: () =>

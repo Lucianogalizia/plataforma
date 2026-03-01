@@ -54,40 +54,45 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
   const [sortKey, setSortKey] = useState<keyof RowState | null>(null);
   const [sortAsc, setSortAsc] = useState(true);
 
-  // Cuando cambian los pozos: inicializar filas y cargar validaciones guardadas
   useEffect(() => {
     if (!pozos.length) return;
 
-    // Primero mostrar filas inmediatamente con datos del snapshot
+    // Mostrar filas inmediatamente con datos del snapshot
     const base = pozosToRows(pozos);
     setRows(base);
     setEditIdx(null);
     setLoading(true);
 
-    // Luego cargar validaciones guardadas pozo por pozo (solo los visibles)
-    Promise.allSettled(
-      pozos.map((p) => api.getValidaciones(p.NO_key))
-    ).then((results) => {
-      setRows((prev) => {
-        const next = [...prev];
-        results.forEach((result, i) => {
-          if (result.status !== "fulfilled") return;
-          const data = result.value;
-          const mediciones = data.mediciones || {};
-          const fecha_key = pozos[i].DT_plot_str || "";
-          // Buscar la medición que coincide con la fecha
-          const med = mediciones[fecha_key];
-          if (med) {
-            next[i] = {
-              ...next[i],
-              validada:   med.validada  ?? true,
-              comentario: med.comentario ?? "",
-            };
-          }
+    // UN solo request con todos los pozos juntos en vez de N requests individuales
+    const nosClave = pozos.map((p) => p.NO_key).join(",");
+    api.getHistorialValidaciones(nosClave)
+      .then((data) => {
+        // Construir mapa: "no_key||fecha_key" → { validada, comentario }
+        const valMap: Record<string, { validada: boolean; comentario: string }> = {};
+        for (const item of data.historial || []) {
+          const key = `${item.no_key}||${item.fecha_key}`;
+          valMap[key] = {
+            validada:   item.validada  ?? true,
+            comentario: item.comentario ?? "",
+          };
+        }
+
+        setRows((prev) => {
+          const next = [...prev];
+          pozos.forEach((p, i) => {
+            const key = `${p.NO_key}||${p.DT_plot_str || ""}`;
+            const val = valMap[key];
+            if (val) {
+              next[i] = { ...next[i], validada: val.validada, comentario: val.comentario };
+            }
+          });
+          return next;
         });
-        return next;
-      });
-    }).finally(() => setLoading(false));
+      })
+      .catch(() => {
+        // Si falla el bulk, la tabla igual muestra los datos del snapshot
+      })
+      .finally(() => setLoading(false));
 
   }, [pozos]);
 

@@ -453,11 +453,17 @@ export const api = {
   },
 
   // ==========================================================
+  // ==========================================================
   // VALIDACIONES
   // ==========================================================
   getValidaciones: (pozo: string) =>
     apiGetCached<{ pozo: string; mediciones: Record<string, ValidacionEstado> }>(
       `/api/validaciones/${encodeURIComponent(pozo)}`
+    ),
+
+  getHistorialValidaciones: (pozos: string) =>
+    apiFetch<{ total: number; historial: { no_key: string; fecha_key: string; validada: boolean; comentario: string }[] }>(
+      `/api/validaciones/historial?pozos=${encodeURIComponent(pozos)}`
     ),
 
   saveValidacion: (
@@ -485,38 +491,11 @@ export const api = {
     if (params?.sum_max != null) qs.set("sum_max", String(params.sum_max));
     if (params?.dias_max != null) qs.set("dias_max", String(params.dias_max));
     if (params?.baterias) qs.set("baterias", params.baterias);
-    return apiFetch<{        // ← apiFetch en vez de apiGetCached (no cachear)
+    return apiFetch<{
       total: number;
       filas: FilaValidacion[];
     }>(`/api/validaciones/tabla?${qs}`);
   },
-
-  // ==========================================================
-  // DIAGNÓSTICOS
-  // ==========================================================
-  getDiagnostico: (pozo: string) =>
-    apiGetCached<Diagnostico>(`/api/diagnosticos/${encodeURIComponent(pozo)}`),
-
-  generarDiagnostico: (pozo: string) =>
-    apiFetch<Diagnostico>(`/api/diagnosticos/${encodeURIComponent(pozo)}/generar`, {
-      method: "POST",
-    }),
-
-  getTablaGlobalDiag: () =>
-    apiGetCached<{ total: number; rows: FilaDiagGlobal[] }>("/api/diagnosticos/tabla-global"),
-
-  getEstadoCache: () =>
-    apiGetCached<{
-      total_pozos_con_din: number;
-      con_diagnostico: number;
-      pendientes: number;
-    }>("/api/diagnosticos/estado-cache"),
-
-  generarTodos: (body: { solo_pendientes?: boolean }) =>
-    apiFetch<{ ok: string[]; error: unknown[]; salteados: string[] }>(
-      "/api/diagnosticos/generar-todos",
-      { method: "POST", body: JSON.stringify(body) }
-    ),
 
   // ==========================================================
   // SISTEMA

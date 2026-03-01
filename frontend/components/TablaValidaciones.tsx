@@ -67,16 +67,17 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
     const nosClave = pozos.map((p) => p.NO_key).join(",");
     api.getHistorialValidaciones(nosClave)
       .then((data) => {
-        // Construir mapa: "no_key||fecha_key" → { validada, comentario }
         const valMap: Record<string, { validada: boolean; comentario: string }> = {};
         for (const item of data.historial || []) {
-          const key = `${item.no_key}||${item.fecha_key}`;
+          // solo nos interesan los estados actuales, no el historial de cambios
+          if (item.Tipo !== "ESTADO_ACTUAL") continue;
+          const key = `${item.Pozo}||${item.Fecha}`;
           valMap[key] = {
-            validada:   item.validada  ?? true,
-            comentario: item.comentario ?? "",
+            validada:   item.Validada  ?? true,
+            comentario: item.Comentario ?? "",
           };
         }
-
+      
         setRows((prev) => {
           const next = [...prev];
           pozos.forEach((p, i) => {

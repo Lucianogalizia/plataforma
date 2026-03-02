@@ -485,12 +485,16 @@ export const api = {
     sum_max?: number;
     dias_max?: number;
     baterias?: string;
+    solo_validadas?: boolean;
+    solo_no_validadas?: boolean;
   }) => {
     const qs = new URLSearchParams();
     if (params?.sum_min != null) qs.set("sum_min", String(params.sum_min));
     if (params?.sum_max != null) qs.set("sum_max", String(params.sum_max));
     if (params?.dias_max != null) qs.set("dias_max", String(params.dias_max));
     if (params?.baterias) qs.set("baterias", params.baterias);
+    if (params?.solo_validadas)    qs.set("solo_validadas",    "true");
+    if (params?.solo_no_validadas) qs.set("solo_no_validadas", "true");
     return apiFetch<{
       total: number;
       filas: FilaValidacion[];

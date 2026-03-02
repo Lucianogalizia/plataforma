@@ -190,9 +190,13 @@ async def obtener(accion_id: str):
 async def editar(accion_id: str, body: AccionUpdate):
     """
     Edita una acción existente.
-    Solo actualiza los campos provistos en el body.
+    Solo actualiza los campos provistos en el body (exclude_unset).
+    Los campos nullable (fecha_fin, fecha_realizacion) pueden enviarse
+    como null explícito para borrarlos.
     """
-    data = {k: v for k, v in body.model_dump().items() if v is not None}
+    # exclude_unset=True: solo los campos que el cliente envió explícitamente
+    # Esto permite enviar fecha_fin=null para borrarla (volver a EN PROCESO)
+    data = body.model_dump(exclude_unset=True)
 
     if "sist_extraccion" in data and data["sist_extraccion"] not in SIST_EXTRACCION_VALIDOS:
         raise HTTPException(

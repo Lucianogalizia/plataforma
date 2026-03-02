@@ -67,8 +67,7 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
     const nosClave = pozos.map((p) => p.NO_key).join(",");
     api.getHistorialValidaciones(nosClave)
       .then((data) => {
-        console.log("HISTORIAL:", data.historial?.slice(0, 3));
-        console.log("POZOS DT_plot_str:", pozos.slice(0, 3).map(p => p.DT_plot_str));
+        console.log("RESPUESTA COMPLETA:", JSON.stringify(data).slice(0, 500));
       
         const valMap: Record<string, { validada: boolean; comentario: string }> = {};
         for (const item of data.historial || []) {

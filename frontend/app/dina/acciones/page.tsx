@@ -138,8 +138,79 @@ function Modal({
 }
 
 // ==========================================================
-// Form Component
+// Searchable Combobox for large lists
 // ==========================================================
+
+function PozoCombobox({
+  value,
+  onChange,
+  pozos,
+}: {
+  value: string;
+  onChange: (val: string, bateria: string) => void;
+  pozos: PozoItem[];
+}) {
+  const [query, setQuery] = useState(value);
+  const [open, setOpen] = useState(false);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return pozos.slice(0, 80);
+    const q = query.toLowerCase();
+    return pozos.filter((p) => p.nombre_pozo.toLowerCase().includes(q)).slice(0, 80);
+  }, [query, pozos]);
+
+  function select(p: PozoItem) {
+    setQuery(p.nombre_pozo);
+    setOpen(false);
+    onChange(p.nombre_pozo, p.bateria);
+  }
+
+  // Sync external value changes (e.g. on edit open)
+  useEffect(() => {
+    setQuery(value);
+  }, [value]);
+
+  return (
+    <div className="relative">
+      <div className="relative">
+        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+        <input
+          type="text"
+          value={query}
+          placeholder="Buscar pozo..."
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          className="w-full pl-8 pr-3 py-2 bg-[#0f172a] border border-[#334155] rounded-lg text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500/30 transition-colors"
+        />
+      </div>
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 top-full mt-1 w-full bg-[#1e293b] border border-[#334155] rounded-lg shadow-xl max-h-52 overflow-y-auto">
+          {filtered.map((p) => (
+            <button
+              key={p.nombre_pozo}
+              type="button"
+              onMouseDown={() => select(p)}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-sky-500/10 transition-colors flex items-center justify-between ${
+                p.nombre_pozo === value ? "text-sky-400 bg-sky-500/10" : "text-slate-300"
+              }`}
+            >
+              <span>{p.nombre_pozo}</span>
+              <span className="text-xs text-slate-500">{p.bateria}</span>
+            </button>
+          ))}
+          {pozos.filter((p) => p.nombre_pozo.toLowerCase().includes(query.toLowerCase())).length > 80 && (
+            <p className="text-center py-2 text-xs text-slate-600">
+              Mostrando 80 de {pozos.filter((p) => p.nombre_pozo.toLowerCase().includes(query.toLowerCase())).length} — refiná la búsqueda
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 
 function AccionForm({
   form,
@@ -178,18 +249,11 @@ function AccionForm({
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className={labelCls}>Pozo <span className="text-red-400">*</span></label>
-          <select
+          <PozoCombobox
             value={form.nombre_pozo}
-            onChange={(e) => set("nombre_pozo", e.target.value)}
-            className={selectCls}
-          >
-            <option value="">Seleccionar pozo...</option>
-            {pozos.map((p) => (
-              <option key={p.nombre_pozo} value={p.nombre_pozo}>
-                {p.nombre_pozo}
-              </option>
-            ))}
-          </select>
+            onChange={(val, bat) => setForm({ ...form, nombre_pozo: val, bateria: bat })}
+            pozos={pozos}
+          />
         </div>
         <div>
           <label className={labelCls}>Batería</label>

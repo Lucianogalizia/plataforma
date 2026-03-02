@@ -56,45 +56,36 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
 
   useEffect(() => {
     if (!pozos.length) return;
-
-    // Mostrar filas inmediatamente con datos del snapshot
+  
     const base = pozosToRows(pozos);
     setRows(base);
     setEditIdx(null);
     setLoading(true);
-
-    // UN solo request con todos los pozos juntos en vez de N requests individuales
-    const nosClave = pozos.map((p) => p.NO_key).join(",");
-    api.getHistorialValidaciones(nosClave)
-      .then((data) => {
-        console.log("RESPUESTA COMPLETA:", JSON.stringify(data).slice(0, 500));
-      
-        const valMap: Record<string, { validada: boolean; comentario: string }> = {};
-        for (const item of data.historial || []) {
-          if ((item["Tipo"] as string) !== "ESTADO_ACTUAL") continue;
-          const key = `${item["Pozo"] as string}||${item["Fecha"] as string}`;
-          valMap[key] = {
-            validada:   (item["Validada"] as boolean) ?? true,
-            comentario: (item["Comentario"] as string) ?? "",
-          };
-        }
-      
-        setRows((prev) => {
-          const next = [...prev];
-          pozos.forEach((p, i) => {
-            const fecha = (p.DT_plot_str || "").slice(0, 16);
-            const key = `${p.NO_key}||${fecha}`;
-            const val = valMap[key];
-            if (val) {
-              next[i] = { ...next[i], validada: val.validada, comentario: val.comentario };
-            }
-          });
-          return next;
+  
+    // Solo cargar validaciones de los pozos que tienen datos guardados
+    Promise.allSettled(
+      pozos.map((p) => api.getValidaciones(p.NO_key))
+    ).then((results) => {
+      setRows((prev) => {
+        const next = [...prev];
+        results.forEach((result, i) => {
+          if (result.status !== "fulfilled") return;
+          const data = result.value;
+          const mediciones = data.mediciones || {};
+          const fecha_key = (pozos[i].DT_plot_str || "").slice(0, 16);
+          const med = mediciones[fecha_key];
+          if (med) {
+            next[i] = {
+              ...next[i],
+              validada:   med.validada  ?? true,
+              comentario: med.comentario ?? "",
+            };
+          }
         });
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-
+        return next;
+      });
+    }).finally(() => setLoading(false));
+  
   }, [pozos]);
 
   const sorted = useMemo(() => {

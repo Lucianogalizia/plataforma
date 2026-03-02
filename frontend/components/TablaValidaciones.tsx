@@ -69,17 +69,17 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
       .then((data) => {
         console.log("HISTORIAL:", data.historial?.slice(0, 3));
         console.log("POZOS DT_plot_str:", pozos.slice(0, 3).map(p => p.DT_plot_str));
-    
+      
         const valMap: Record<string, { validada: boolean; comentario: string }> = {};
         for (const item of data.historial || []) {
-          if ((item.Tipo as string) !== "ESTADO_ACTUAL") continue;
-          const key = `${item.Pozo as string}||${item.Fecha as string}`;
+          if ((item["Tipo"] as string) !== "ESTADO_ACTUAL") continue;
+          const key = `${item["Pozo"] as string}||${item["Fecha"] as string}`;
           valMap[key] = {
-            validada:   (item.Validada as boolean) ?? true,
-            comentario: (item.Comentario as string) ?? "",
+            validada:   (item["Validada"] as boolean) ?? true,
+            comentario: (item["Comentario"] as string) ?? "",
           };
         }
-    
+      
         setRows((prev) => {
           const next = [...prev];
           pozos.forEach((p, i) => {

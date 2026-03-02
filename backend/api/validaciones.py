@@ -149,7 +149,58 @@ def _load_snap_map() -> pd.DataFrame:
 
     return snap_map
 
+# ==========================================================
+# GET /api/validaciones/historial
+# ==========================================================
 
+@router.get("/historial")
+async def get_historial_validaciones(
+    pozos: Optional[str] = Query(
+        None,
+        description="NO_keys separados por coma. Si vacío, devuelve todos."
+    ),
+):
+    """
+    Devuelve el historial completo de validaciones para exportar.
+    Incluye estado actual y cada cambio registrado.
+
+    Query params:
+        pozos: lista de NO_key separados por coma (opcional)
+
+    Returns:
+        {
+            "total": int,
+            "historial": [
+                {
+                    "Pozo":       str,
+                    "Fecha":      str,
+                    "Validada":   bool,
+                    "Comentario": str,
+                    "Tipo":       "ESTADO_ACTUAL" | "CAMBIO",
+                    "Timestamp":  str,
+                    "Usuario":    str,
+                }
+            ]
+        }
+    """
+    if pozos:
+        pozos_list = [
+            normalize_no_exact(p.strip())
+            for p in pozos.split(",")
+            if p.strip()
+        ]
+    else:
+        # Si no se especifican, cargar todos los del snapshot
+        snap_map   = _load_snap_map()
+        pozos_list = snap_map["NO_key"].dropna().unique().tolist() if not snap_map.empty else []
+
+    if not pozos_list:
+        return {"total": 0, "historial": []}
+
+    todas_val = load_all_validaciones(pozos_list)
+    historial = build_historial_completo(todas_val)
+
+    return {"total": len(historial), "historial": historial}
 # ==========================================================
 # GET /api/validaciones/{pozo}
 # ==========================================================
@@ -451,59 +502,6 @@ async def get_tabla_validaciones(
 
     return {"total": len(filas), "filas": filas}
 
-
-# ==========================================================
-# GET /api/validaciones/historial
-# ==========================================================
-
-@router.get("/historial")
-async def get_historial_validaciones(
-    pozos: Optional[str] = Query(
-        None,
-        description="NO_keys separados por coma. Si vacío, devuelve todos."
-    ),
-):
-    """
-    Devuelve el historial completo de validaciones para exportar.
-    Incluye estado actual y cada cambio registrado.
-
-    Query params:
-        pozos: lista de NO_key separados por coma (opcional)
-
-    Returns:
-        {
-            "total": int,
-            "historial": [
-                {
-                    "Pozo":       str,
-                    "Fecha":      str,
-                    "Validada":   bool,
-                    "Comentario": str,
-                    "Tipo":       "ESTADO_ACTUAL" | "CAMBIO",
-                    "Timestamp":  str,
-                    "Usuario":    str,
-                }
-            ]
-        }
-    """
-    if pozos:
-        pozos_list = [
-            normalize_no_exact(p.strip())
-            for p in pozos.split(",")
-            if p.strip()
-        ]
-    else:
-        # Si no se especifican, cargar todos los del snapshot
-        snap_map   = _load_snap_map()
-        pozos_list = snap_map["NO_key"].dropna().unique().tolist() if not snap_map.empty else []
-
-    if not pozos_list:
-        return {"total": 0, "historial": []}
-
-    todas_val = load_all_validaciones(pozos_list)
-    historial = build_historial_completo(todas_val)
-
-    return {"total": len(historial), "historial": historial}
 
 
 # ==========================================================

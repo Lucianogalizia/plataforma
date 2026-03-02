@@ -9,6 +9,7 @@ import {
   Bot,
   Activity,
   ChevronRight,
+  Wrench,
 } from "lucide-react";
 
 const NAV = [
@@ -25,6 +26,7 @@ const NAV = [
       { label: "Estadísticas", href: "/dina/estadisticas", icon: LayoutDashboard },
       { label: "Mapa",         href: "/dina/mapa",         icon: Map },
       { label: "Diagnósticos", href: "/dina/diagnosticos", icon: Bot },
+      { label: "Acciones",     href: "/dina/acciones",     icon: Wrench },
     ],
   },
   {

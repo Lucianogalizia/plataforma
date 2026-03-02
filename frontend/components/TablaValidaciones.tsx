@@ -67,21 +67,24 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
     const nosClave = pozos.map((p) => p.NO_key).join(",");
     api.getHistorialValidaciones(nosClave)
       .then((data) => {
+        console.log("HISTORIAL:", data.historial?.slice(0, 3));
+        console.log("POZOS DT_plot_str:", pozos.slice(0, 3).map(p => p.DT_plot_str));
+    
         const valMap: Record<string, { validada: boolean; comentario: string }> = {};
         for (const item of data.historial || []) {
-          // solo nos interesan los estados actuales, no el historial de cambios
-          if (item.Tipo !== "ESTADO_ACTUAL") continue;
-          const key = `${item.Pozo}||${item.Fecha}`;
+          if ((item.Tipo as string) !== "ESTADO_ACTUAL") continue;
+          const key = `${item.Pozo as string}||${item.Fecha as string}`;
           valMap[key] = {
             validada:   (item.Validada as boolean) ?? true,
             comentario: (item.Comentario as string) ?? "",
           };
         }
-      
+    
         setRows((prev) => {
           const next = [...prev];
           pozos.forEach((p, i) => {
-            const key = `${p.NO_key}||${p.DT_plot_str || ""}`;
+            const fecha = (p.DT_plot_str || "").slice(0, 16);
+            const key = `${p.NO_key}||${fecha}`;
             const val = valMap[key];
             if (val) {
               next[i] = { ...next[i], validada: val.validada, comentario: val.comentario };
@@ -90,9 +93,7 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
           return next;
         });
       })
-      .catch(() => {
-        // Si falla el bulk, la tabla igual muestra los datos del snapshot
-      })
+      .catch(() => {})
       .finally(() => setLoading(false));
 
   }, [pozos]);

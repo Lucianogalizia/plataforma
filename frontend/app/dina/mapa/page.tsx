@@ -34,8 +34,18 @@ export default function MapaPage() {
       ]);
       let pts = mapa.puntos;
 
-      if (filtroVal === "Solo no validadas") {
-        pts = pts.filter((p) => p.Sumergencia != null && p.Sumergencia < 0);
+      // Filtro de validacion: consulta las validaciones reales de GCS
+      // y cruza por NO_key para incluir/excluir correctamente.
+      if (filtroVal === "Solo validadas" || filtroVal === "Solo no validadas") {
+        const tablaRes = await api.getTablaValidaciones({
+          solo_validadas:    filtroVal === "Solo validadas"    ? true : undefined,
+          solo_no_validadas: filtroVal === "Solo no validadas" ? true : undefined,
+          baterias: batSel.join(","),
+        });
+        // El backend devuelve las filas que cumplen el criterio.
+        // Cruzamos por NO_key para filtrar los puntos del mapa.
+        const noKeysValidos = new Set(tablaRes.filas.map((f) => f._no_key));
+        pts = pts.filter((p) => noKeysValidos.has(p.NO_key));
       }
 
       setPuntos(pts);

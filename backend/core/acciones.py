@@ -150,6 +150,8 @@ def actualizar_accion(accion_id: str, data: dict) -> dict | None:
     ]
 
     for campo in campos_editables:
+        # Actualizamos si el campo está presente en data,
+        # incluyendo cuando el valor es None (para borrar fecha_fin, etc.)
         if campo in data:
             acciones[idx][campo] = data[campo]
 

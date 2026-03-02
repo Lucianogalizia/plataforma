@@ -50,6 +50,7 @@ from api.niv          import router as niv_router
 from api.mapa         import router as mapa_router
 from api.validaciones import router as validaciones_router
 from api.diagnosticos import router as diagnosticos_router
+from api.acciones     import router as acciones_router
 
 
 # ==========================================================
@@ -213,6 +214,12 @@ app.include_router(
     diagnosticos_router,
     prefix = "/api/diagnosticos",
     tags   = ["Diagnósticos — IA con OpenAI"],
+)
+
+app.include_router(
+    acciones_router,
+    prefix = "/api/acciones",
+    tags   = ["Acciones — Optimización de pozos"],
 )
 
 

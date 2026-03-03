@@ -409,6 +409,7 @@ export const api = {
     dias_min?: number;
     dias_max?: number;
     baterias?: string;
+    solo_validadas?: boolean | null;
   }) => {
     const qs = new URLSearchParams();
     if (params?.sum_min != null)  qs.set("sum_min",  String(params.sum_min));
@@ -416,6 +417,7 @@ export const api = {
     if (params?.dias_min != null) qs.set("dias_min", String(params.dias_min));
     if (params?.dias_max != null) qs.set("dias_max", String(params.dias_max));
     if (params?.baterias)         qs.set("baterias", params.baterias);
+    if (params?.solo_validadas != null) qs.set("solo_validadas", String(params.solo_validadas));
     return apiGetCached<{ total: number; puntos: PuntoMapa[] }>(
       `/api/din/snapshot-mapa?${qs}`
     );

@@ -24,6 +24,11 @@ interface Accion {
   fecha_realizacion: string | null;
   fecha_fin: string | null;
   tipo: string;
+  tipo_accion: string;
+  recurso: string;
+  neta_incremental: number;
+  bruta_incremental: number;
+  inyeccion: number;
   accion: string;
   estado: "EN PROCESO" | "FINALIZADO";
   creado_utc: string;
@@ -33,7 +38,9 @@ interface Accion {
 interface FormData {
   nombre_pozo: string; bateria: string; sist_extraccion: string;
   fecha_accion: string; fecha_realizacion: string;
-  fecha_fin: string; tipo: string; accion: string;
+  fecha_fin: string; tipo: string; tipo_accion: string;
+  recurso: string; neta_incremental: string; bruta_incremental: string;
+  inyeccion: string; accion: string;
 }
 
 interface GrupoPozo {
@@ -50,10 +57,14 @@ type Vista = "plana" | "agrupada";
 
 const SIST_EXTRACCION = ["AIB", "BES", "PCP", "SWABBING", "SURGENTE", "OTRO"];
 const TIPOS = ["Superficie", "Fondo"];
+const TIPOS_ACCION = ["Optimización", "Operativa"];
+const RECURSOS = ["eléctricos", "Grúa", "Operador BES", "Operador PCP", "Pulling", "WO", "químicos", "CT"];
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const FORM_EMPTY: FormData = {
   nombre_pozo: "", bateria: "", sist_extraccion: "",
-  fecha_accion: "", fecha_realizacion: "", fecha_fin: "", tipo: "", accion: "",
+  fecha_accion: "", fecha_realizacion: "", fecha_fin: "", tipo: "",
+  tipo_accion: "", recurso: "", neta_incremental: "", bruta_incremental: "",
+  inyeccion: "", accion: "",
 };
 
 // ==========================================================
@@ -87,9 +98,10 @@ function tipoBadge(tipo: string) {
 
 function exportCSV(acciones: Accion[], scope: "visible" | "all", allAcciones: Accion[]) {
   const data = scope === "all" ? allAcciones : acciones;
-  const headers = ["Pozo","Bateria","Sist.Extraccion","Tipo","Fecha Accion","Fecha Realizacion","Fecha Fin","Estado","Descripcion"];
+  const headers = ["Pozo","Bateria","Sist.Extraccion","Tipo","Tipo Accion","Recurso","Neta Incremental","Bruta Incremental","Inyeccion","Fecha Accion","Fecha Realizacion","Fecha Fin","Estado","Descripcion"];
   const rows = data.map(a => [
     a.nombre_pozo, a.bateria, a.sist_extraccion, a.tipo,
+    a.tipo_accion, a.recurso, a.neta_incremental ?? "", a.bruta_incremental ?? "", a.inyeccion ?? "",
     fmt(a.fecha_accion), fmt(a.fecha_realizacion), fmt(a.fecha_fin),
     a.estado, '"' + (a.accion || "").replace(/"/g, '""') + '"'
   ].join(","));
@@ -273,6 +285,41 @@ function AccionForm({ form, setForm, pozos, onSubmit, onCancel, loading, isEdit 
         </div>
       </div>
 
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className={lbl}>Tipo de Acción <span className="text-red-400">*</span></label>
+          <select value={form.tipo_accion} onChange={e => set("tipo_accion", e.target.value)} className={inp + " cursor-pointer"}>
+            <option value="">Seleccionar...</option>
+            {TIPOS_ACCION.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={lbl}>Recurso <span className="text-red-400">*</span></label>
+          <select value={form.recurso} onChange={e => set("recurso", e.target.value)} className={inp + " cursor-pointer"}>
+            <option value="">Seleccionar...</option>
+            {RECURSOS.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div>
+          <label className={lbl}>Neta Incremental <span className="text-red-400">*</span></label>
+          <input type="number" step="any" value={form.neta_incremental} onChange={e => set("neta_incremental", e.target.value)}
+            placeholder="0.00" className={inp} />
+        </div>
+        <div>
+          <label className={lbl}>Bruta Incremental <span className="text-red-400">*</span></label>
+          <input type="number" step="any" value={form.bruta_incremental} onChange={e => set("bruta_incremental", e.target.value)}
+            placeholder="0.00" className={inp} />
+        </div>
+        <div>
+          <label className={lbl}>Inyección <span className="text-red-400">*</span></label>
+          <input type="number" step="any" value={form.inyeccion} onChange={e => set("inyeccion", e.target.value)}
+            placeholder="0.00" className={inp} />
+        </div>
+      </div>
+
       <div className="grid grid-cols-3 gap-4">
         {([
           { label: "Fecha Acción",      field: "fecha_accion"      as const, req: true  },
@@ -407,7 +454,30 @@ function DetailPanel({ accion, onEdit, onDelete }: {
     <div className="px-6 pb-5 pt-3 bg-[#0f172a]/60 border-t border-[#1e2d3d]">
       <div className="grid grid-cols-3 gap-4 mb-4">
         {([
-          { label: "Fecha Realización", value: fmt(accion.fecha_realizacion) },
+          { label: "Tipo de Acción",     value: accion.tipo_accion ?? "—" },
+          { label: "Recurso",            value: accion.recurso ?? "—" },
+          { label: "Fecha Realización",  value: fmt(accion.fecha_realizacion) },
+        ]).map(({ label, value }) => (
+          <div key={label} className="bg-[#1e293b] rounded-lg p-3 border border-[#334155]">
+            <p className="text-xs text-slate-500 mb-1">{label}</p>
+            <p className="text-sm text-slate-300 font-medium">{value}</p>
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        {([
+          { label: "Neta Incremental",   value: accion.neta_incremental != null ? String(accion.neta_incremental) : "—" },
+          { label: "Bruta Incremental",  value: accion.bruta_incremental != null ? String(accion.bruta_incremental) : "—" },
+          { label: "Inyección",          value: accion.inyeccion != null ? String(accion.inyeccion) : "—" },
+        ]).map(({ label, value }) => (
+          <div key={label} className="bg-[#1e293b] rounded-lg p-3 border border-[#334155]">
+            <p className="text-xs text-slate-500 mb-1">{label}</p>
+            <p className="text-sm text-slate-300 font-medium">{value}</p>
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        {([
           { label: "Fecha Fin",         value: fmt(accion.fecha_fin) },
           { label: "Últ. modificación", value: (accion.modificado_utc ?? "").slice(0, 16).replace("T", " ") || "—" },
         ]).map(({ label, value }) => (
@@ -551,14 +621,21 @@ export default function AccionesPage() {
   // --- CRUD ---
 
   async function handleCreate() {
-    if (!form.nombre_pozo || !form.sist_extraccion || !form.fecha_accion || !form.tipo || !form.accion) {
+    if (!form.nombre_pozo || !form.sist_extraccion || !form.fecha_accion || !form.tipo || !form.accion || !form.tipo_accion || !form.recurso || !form.neta_incremental || !form.bruta_incremental || !form.inyeccion) {
       alert("Completá los campos obligatorios (*)"); return;
     }
     setSaving(true);
     try {
       const res = await fetch(API + "/api/acciones", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, fecha_realizacion: form.fecha_realizacion || null, fecha_fin: form.fecha_fin || null }),
+        body: JSON.stringify({
+          ...form,
+          fecha_realizacion: form.fecha_realizacion || null,
+          fecha_fin: form.fecha_fin || null,
+          neta_incremental: parseFloat(form.neta_incremental),
+          bruta_incremental: parseFloat(form.bruta_incremental),
+          inyeccion: parseFloat(form.inyeccion),
+        }),
       });
       if (!res.ok) throw new Error(await res.text());
       setModalOpen(false); setForm(FORM_EMPTY); fetchAll();
@@ -572,7 +649,12 @@ export default function AccionesPage() {
       nombre_pozo: accion.nombre_pozo, bateria: accion.bateria,
       sist_extraccion: accion.sist_extraccion, fecha_accion: accion.fecha_accion ?? "",
       fecha_realizacion: accion.fecha_realizacion ?? "", fecha_fin: accion.fecha_fin ?? "",
-      tipo: accion.tipo, accion: accion.accion,
+      tipo: accion.tipo, tipo_accion: accion.tipo_accion ?? "",
+      recurso: accion.recurso ?? "",
+      neta_incremental: String(accion.neta_incremental ?? ""),
+      bruta_incremental: String(accion.bruta_incremental ?? ""),
+      inyeccion: String(accion.inyeccion ?? ""),
+      accion: accion.accion,
     });
     setEditOpen(true);
   }
@@ -583,7 +665,14 @@ export default function AccionesPage() {
     try {
       const res = await fetch(API + "/api/acciones/" + editId, {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, fecha_realizacion: form.fecha_realizacion || null, fecha_fin: form.fecha_fin || null }),
+        body: JSON.stringify({
+          ...form,
+          fecha_realizacion: form.fecha_realizacion || null,
+          fecha_fin: form.fecha_fin || null,
+          neta_incremental: form.neta_incremental ? parseFloat(form.neta_incremental) : null,
+          bruta_incremental: form.bruta_incremental ? parseFloat(form.bruta_incremental) : null,
+          inyeccion: form.inyeccion ? parseFloat(form.inyeccion) : null,
+        }),
       });
       if (!res.ok) throw new Error(await res.text());
       setEditOpen(false); setEditId(null); setForm(FORM_EMPTY); fetchAll();

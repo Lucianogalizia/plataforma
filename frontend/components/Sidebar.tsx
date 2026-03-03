@@ -36,6 +36,11 @@ const NAV = [
     disabled: true,
     badge: "Próximamente",
   },
+  {
+    label: "MERMA",
+    href: "/merma",
+    icon: TrendingUp,
+  },
 ];
 
 export default function Sidebar() {

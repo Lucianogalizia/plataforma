@@ -55,6 +55,13 @@ export default function DashboardPage() {
       desc: "Análisis automático con IA de cartas dinamométricas. Tabla global y diagnóstico por pozo.",
       color: "purple",
     },
+    {
+      href: "/merma",
+      icon: TrendingUp,
+      label: "Análisis de MERMA",
+      desc: "Dashboard interactivo de análisis de merma de producción. Generado por script local.",
+      color: "amber",
+    },
   ];
 
   const colorBorder: Record<string, string> = {
@@ -62,12 +69,14 @@ export default function DashboardPage() {
     green:  "border-green-500/30  hover:border-green-400",
     orange: "border-orange-500/30 hover:border-orange-400",
     purple: "border-purple-500/30 hover:border-purple-400",
+    amber:  "border-amber-500/30  hover:border-amber-400",
   };
   const colorIcon: Record<string, string> = {
     sky:    "text-sky-400",
     green:  "text-green-400",
     orange: "text-orange-400",
     purple: "text-purple-400",
+    amber:  "text-amber-400",
   };
 
   return (

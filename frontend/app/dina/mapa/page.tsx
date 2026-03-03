@@ -24,29 +24,21 @@ export default function MapaPage() {
   const cargar = useCallback(async () => {
     setLoading(true);
     try {
+      // solo_validadas: null=todos, true=solo validadas, false=solo no validadas
+      const soloVal =
+        filtroVal === "Solo validadas"    ? true  :
+        filtroVal === "Solo no validadas" ? false : null;
+
       const [mapa, bats] = await Promise.all([
         api.getSnapshotMapa({
           sum_min: sumMin, sum_max: sumMax,
           dias_min: diasMin, dias_max: diasMax,
           baterias: batSel.join(","),
+          solo_validadas: soloVal,
         }),
         api.getBaterias(),
       ]);
       let pts = mapa.puntos;
-
-      // Filtro de validacion: consulta las validaciones reales de GCS
-      // y cruza por NO_key para incluir/excluir correctamente.
-      if (filtroVal === "Solo validadas" || filtroVal === "Solo no validadas") {
-        const tablaRes = await api.getTablaValidaciones({
-          solo_validadas:    filtroVal === "Solo validadas"    ? true : undefined,
-          solo_no_validadas: filtroVal === "Solo no validadas" ? true : undefined,
-          baterias: batSel.join(","),
-        });
-        // El backend devuelve las filas que cumplen el criterio.
-        // Cruzamos por NO_key para filtrar los puntos del mapa.
-        const noKeysValidos = new Set(tablaRes.filas.map((f) => f._no_key));
-        pts = pts.filter((p) => noKeysValidos.has(p.NO_key));
-      }
 
       setPuntos(pts);
       if (bats.baterias && batSel.length === 0) {
@@ -221,7 +213,7 @@ export default function MapaPage() {
               {(["Todos", "Solo validadas", "Solo no validadas"] as const).map((op) => (
                 <button
                   key={op}
-                  onClick={() => setFiltroVal(op)}
+                  onClick={() => { setFiltroVal(op); }}
                   className={`text-xs px-2 py-1 rounded border transition-colors ${
                     filtroVal === op
                       ? "bg-sky-500/10 border-sky-400 text-sky-300"

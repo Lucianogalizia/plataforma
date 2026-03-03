@@ -36,6 +36,8 @@ router = APIRouter()
 # Sistemas de extracción válidos
 SIST_EXTRACCION_VALIDOS = ["AIB", "BES", "PCP", "SWABBING", "SURGENTE", "OTRO"]
 TIPOS_VALIDOS = ["Superficie", "Fondo"]
+TIPOS_ACCION_VALIDOS = ["Optimización", "Operativa"]
+RECURSOS_VALIDOS = ["eléctricos", "Grúa", "Operador BES", "Operador PCP", "Pulling", "WO", "químicos", "CT"]
 
 
 # ==========================================================
@@ -50,6 +52,11 @@ class AccionBase(BaseModel):
     fecha_realizacion: Optional[str] = None
     fecha_fin:         Optional[str] = None
     tipo:              str
+    tipo_accion:       str
+    recurso:           str
+    neta_incremental:  float
+    bruta_incremental: float
+    inyeccion:         float
     accion:            str
 
 
@@ -65,6 +72,11 @@ class AccionUpdate(BaseModel):
     fecha_realizacion: Optional[str] = None
     fecha_fin:         Optional[str] = None
     tipo:              Optional[str] = None
+    tipo_accion:       Optional[str] = None
+    recurso:           Optional[str] = None
+    neta_incremental:  Optional[float] = None
+    bruta_incremental: Optional[float] = None
+    inyeccion:         Optional[float] = None
     accion:            Optional[str] = None
 
 
@@ -164,6 +176,16 @@ async def crear(body: AccionCreate):
             status_code=422,
             detail=f"tipo debe ser uno de: {TIPOS_VALIDOS}"
         )
+    if body.tipo_accion not in TIPOS_ACCION_VALIDOS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"tipo_accion debe ser uno de: {TIPOS_ACCION_VALIDOS}"
+        )
+    if body.recurso not in RECURSOS_VALIDOS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"recurso debe ser uno de: {RECURSOS_VALIDOS}"
+        )
 
     accion = crear_accion(body.model_dump())
     return accion
@@ -207,6 +229,16 @@ async def editar(accion_id: str, body: AccionUpdate):
         raise HTTPException(
             status_code=422,
             detail=f"tipo debe ser uno de: {TIPOS_VALIDOS}"
+        )
+    if "tipo_accion" in data and data["tipo_accion"] not in TIPOS_ACCION_VALIDOS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"tipo_accion debe ser uno de: {TIPOS_ACCION_VALIDOS}"
+        )
+    if "recurso" in data and data["recurso"] not in RECURSOS_VALIDOS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"recurso debe ser uno de: {RECURSOS_VALIDOS}"
         )
 
     accion = actualizar_accion(accion_id, data)

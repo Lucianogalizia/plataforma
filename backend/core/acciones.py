@@ -116,6 +116,11 @@ def crear_accion(data: dict) -> dict:
         "fecha_realizacion": data.get("fecha_realizacion"),
         "fecha_fin":         data.get("fecha_fin"),
         "tipo":              data.get("tipo", ""),
+        "tipo_accion":       data.get("tipo_accion", ""),
+        "recurso":           data.get("recurso", ""),
+        "neta_incremental":  data.get("neta_incremental"),
+        "bruta_incremental": data.get("bruta_incremental"),
+        "inyeccion":         data.get("inyeccion"),
         "accion":            data.get("accion", ""),
         "creado_utc":        now,
         "modificado_utc":    now,
@@ -146,7 +151,9 @@ def actualizar_accion(accion_id: str, data: dict) -> dict | None:
     campos_editables = [
         "nombre_pozo", "bateria", "sist_extraccion",
         "fecha_accion", "fecha_realizacion", "fecha_fin",
-        "tipo", "accion",
+        "tipo", "tipo_accion", "recurso",
+        "neta_incremental", "bruta_incremental", "inyeccion",
+        "accion",
     ]
 
     for campo in campos_editables:

@@ -29,9 +29,14 @@ from core.gcs import (
     load_niv_index,
     load_snapshot,
     load_coords_repo,
+    load_all_validaciones,
     resolve_existing_path,
     gcs_download_to_temp,
     is_gs_path,
+)
+from core.validaciones import (
+    make_fecha_key,
+    get_validacion,
 )
 from core.parsers import (
     parse_din_surface_points,
@@ -557,6 +562,10 @@ async def get_snapshot_mapa(
         None,
         description="Baterías separadas por coma, ej: 'BAT1,BAT2'"
     ),
+    solo_validadas: Optional[bool] = Query(
+        None,
+        description="None=todos | True=solo validadas | False=solo no validadas"
+    ),
 ):
     """
     Devuelve el snapshot para el mapa de sumergencia.
@@ -646,6 +655,20 @@ async def get_snapshot_mapa(
         m = m[m["Dias_desde_ultima"] >= dias_min]
     if dias_max is not None:
         m = m[m["Dias_desde_ultima"] <= dias_max]
+
+    # --- Filtro por validación ---
+    if solo_validadas is not None:
+        pozos_val = m["NO_key"].dropna().unique().tolist()
+        todas_val = load_all_validaciones(pozos_val)
+
+        def _es_valida(row) -> bool:
+            nk  = str(row.get("NO_key", ""))
+            fk  = make_fecha_key(row.get("DT_plot"))
+            vd  = todas_val.get(nk, {})
+            return get_validacion(vd, fk).get("validada", True)
+
+        mask = m.apply(_es_valida, axis=1)
+        m = m[mask].copy() if solo_validadas else m[~mask].copy()
 
     # --- Preparar respuesta JSON-safe ---
     m["DT_plot_str"] = pd.to_datetime(

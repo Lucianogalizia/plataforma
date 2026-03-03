@@ -51,6 +51,7 @@ from api.mapa         import router as mapa_router
 from api.validaciones import router as validaciones_router
 from api.diagnosticos import router as diagnosticos_router
 from api.acciones     import router as acciones_router
+from api.merma        import router as merma_router
 
 
 # ==========================================================
@@ -220,6 +221,12 @@ app.include_router(
     acciones_router,
     prefix = "/api/acciones",
     tags   = ["Acciones — Optimización de pozos"],
+)
+
+app.include_router(
+    merma_router,
+    prefix = "/api/merma",
+    tags   = ["MERMA — Dashboard de análisis de merma"],
 )
 
 

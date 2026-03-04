@@ -62,29 +62,32 @@ export default function TablaValidaciones({ pozos }: TablaValidacionesProps) {
     setEditIdx(null);
     setLoading(true);
   
-    // Solo cargar validaciones de los pozos que tienen datos guardados
-    Promise.allSettled(
-      pozos.map((p) => api.getValidaciones(p.NO_key))
-    ).then((results) => {
-      setRows((prev) => {
-        const next = [...prev];
-        results.forEach((result, i) => {
-          if (result.status !== "fulfilled") return;
-          const data = result.value;
-          const mediciones = data.mediciones || {};
-          const fecha_key = (pozos[i].DT_plot_str || "").slice(0, 16);
-          const med = mediciones[fecha_key];
-          if (med) {
-            next[i] = {
-              ...next[i],
-              validada:   med.validada  ?? true,
-              comentario: med.comentario ?? "",
-            };
-          }
+    // Una sola llamada batch en vez de N llamadas individuales
+    const pozosKeys = pozos.map((p) => p.NO_key);
+    api.getValidacionesBatch(pozosKeys)
+      .then((data) => {
+        const validaciones = data.validaciones || {};
+        setRows((prev) => {
+          const next = [...prev];
+          pozos.forEach((p, i) => {
+            const val = validaciones[p.NO_key];
+            if (!val) return;
+            const mediciones = val.mediciones || {};
+            const fecha_key = (p.DT_plot_str || "").slice(0, 16);
+            const med = mediciones[fecha_key];
+            if (med) {
+              next[i] = {
+                ...next[i],
+                validada:   med.validada  ?? true,
+                comentario: med.comentario ?? "",
+              };
+            }
+          });
+          return next;
         });
-        return next;
-      });
-    }).finally(() => setLoading(false));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   
   }, [pozos]);
 

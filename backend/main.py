@@ -101,15 +101,46 @@ async def lifespan(app: FastAPI):
         print(f"  OpenAI Key:  ❌ Error: {e}")
 
     # Precalentar caché
+    din_ok = None
     try:
         from api.din import _load_indexes_with_keys
         from api.mapa import _build_snap_con_coords
         print("  Caché:       ⏳ Precalentando índices y snapshot...")
         din_ok, niv_ok, _ = _load_indexes_with_keys()
         _build_snap_con_coords(din_ok, niv_ok)
-        print("  Caché:       ✅ Listo")
+        print("  Caché:       ✅ Índices + snapshot listos")
     except Exception as e:
-        print(f"  Caché:       ⚠️  Error precalentando: {e}")
+        print(f"  Caché:       ⚠️  Error precalentando índices: {e}")
+
+    # Precalentar datos que antes no se cacheaban
+    try:
+        print("  Caché:       ⏳ Precalentando acciones, validaciones, diagnósticos...")
+
+        from core.acciones import load_acciones
+        load_acciones()
+
+        from core.gcs import load_all_validaciones, load_all_diags_from_gcs
+
+        # Obtener lista de pozos desde din_ok (si se cargó)
+        pozos = []
+        if din_ok is not None and not din_ok.empty and "NO_key" in din_ok.columns:
+            pozos = sorted(din_ok["NO_key"].dropna().unique().tolist())
+
+        if pozos:
+            load_all_validaciones(pozos)
+            load_all_diags_from_gcs(pozos)
+
+        # Precalentar cachés procesados de diagnósticos y validaciones
+        from api.diagnosticos import _load_din_niv_ok, _get_bat_map
+        _load_din_niv_ok()
+        _get_bat_map()
+
+        from api.validaciones import _load_snap_map
+        _load_snap_map()
+
+        print("  Caché:       ✅ Todo precalentado")
+    except Exception as e:
+        print(f"  Caché:       ⚠️  Error precalentando extras: {e}")
 
     print(f"  CORS Origins: {CORS_ORIGINS}")
     print("=" * 60)

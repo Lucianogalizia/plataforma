@@ -34,6 +34,7 @@ from core.consolidado import (
     prepare_indexes,
     build_last_snapshot_for_map,
 )
+from core.cache import cache
 from core.validaciones import (
     make_fecha_key,
     get_validacion,
@@ -46,6 +47,8 @@ from core.validaciones import (
 )
 
 router = APIRouter()
+
+_VAL_SNAP_TTL = 3600  # 1 hora
 
 
 # ==========================================================
@@ -82,7 +85,12 @@ def _load_snap_map() -> pd.DataFrame:
     """
     Carga el snapshot para el mapa (1 fila por pozo).
     Usado como base para construir la tabla de validaciones.
+    Resultado cacheado en memoria (_VAL_SNAP_TTL).
     """
+    cached = cache.get("val_snap_map")
+    if cached is not None:
+        return cached.copy()
+
     df_din = load_din_index()
     df_niv = load_niv_index()
 
@@ -147,7 +155,8 @@ def _load_snap_map() -> pd.DataFrame:
         if "nivel_5" in snap_map.columns:
             snap_map["nivel_5"] = snap_map["nivel_5"].astype("string").str.strip()
 
-    return snap_map
+    cache.set("val_snap_map", snap_map, ttl=_VAL_SNAP_TTL)
+    return snap_map.copy()
 
 # ==========================================================
 # GET /api/validaciones/historial

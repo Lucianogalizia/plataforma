@@ -210,6 +210,55 @@ async def get_historial_validaciones(
     historial = build_historial_completo(todas_val)
 
     return {"total": len(historial), "historial": historial}
+
+
+# ==========================================================
+# GET /api/validaciones/batch
+# ==========================================================
+
+@router.get("/batch")
+async def get_validaciones_batch(
+    pozos: str = Query(
+        ...,
+        description="Lista de NO_key separados por coma"
+    ),
+):
+    """
+    Devuelve las validaciones de múltiples pozos en una sola llamada.
+    Usa load_all_validaciones (batch via list_blobs).
+
+    Query params:
+        pozos: "pozo1,pozo2,pozo3"
+
+    Returns:
+        {
+            "validaciones": {
+                "pozo1": { "mediciones": {...} },
+                "pozo2": { "mediciones": {...} }
+            }
+        }
+    """
+    pozos_list = [
+        normalize_no_exact(p.strip())
+        for p in pozos.split(",")
+        if p.strip()
+    ]
+
+    if not pozos_list:
+        return {"validaciones": {}}
+
+    todas_val = load_all_validaciones(pozos_list)
+
+    result = {}
+    for no_key in pozos_list:
+        val_data = todas_val.get(no_key, {})
+        result[no_key] = {
+            "mediciones": val_data.get("mediciones", {}),
+        }
+
+    return {"validaciones": result}
+
+
 # ==========================================================
 # GET /api/validaciones/{pozo}
 # ==========================================================

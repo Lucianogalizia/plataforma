@@ -27,3 +27,6 @@ openai==1.59.7
 
 # --- Utils ---
 python-dotenv==1.0.1          # .env en desarrollo local
+
+# --- RRHH / Guardias ---
+psycopg2-binary==2.9.10       # Postgres para módulo RRHH

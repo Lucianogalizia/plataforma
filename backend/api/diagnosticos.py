@@ -39,6 +39,7 @@ from core.gcs import (
 )
 from core.parsers import normalize_no_exact
 from core.consolidado import prepare_indexes
+from core.cache import cache
 from ia.diagnostico import (
     get_openai_key,
     generar_diagnostico,
@@ -51,6 +52,8 @@ from ia.diagnostico import (
 )
 
 router = APIRouter()
+
+_DIAG_IDX_TTL = 3600  # 1 hora — datos cambian ~1 vez por día
 
 
 # ==========================================================
@@ -83,6 +86,10 @@ _batch_status: dict = {
 # ==========================================================
 
 def _load_din_niv_ok():
+    cached = cache.get("diag_indexes_ok")
+    if cached is not None:
+        return (cached[0].copy(), cached[1].copy())
+
     df_din = load_din_index()
     df_niv = load_niv_index()
 
@@ -101,12 +108,19 @@ def _load_din_niv_ok():
     if not niv_ok.empty and "error" in niv_ok.columns:
         niv_ok = niv_ok[niv_ok["error"].isna()]
 
-    return din_ok, niv_ok
+    result = (din_ok, niv_ok)
+    cache.set("diag_indexes_ok", result, ttl=_DIAG_IDX_TTL)
+    return result
 
 
 def _get_bat_map() -> dict:
+    cached = cache.get("diag_bat_map")
+    if cached is not None:
+        return cached
     coords = load_coords_repo()
-    return build_bat_map(coords, normalize_no_exact)
+    result = build_bat_map(coords, normalize_no_exact)
+    cache.set("diag_bat_map", result, ttl=_DIAG_IDX_TTL)
+    return result
 
 
 def _get_pozos_con_din(din_ok: pd.DataFrame) -> list[str]:

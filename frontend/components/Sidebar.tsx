@@ -10,6 +10,7 @@ import {
   Activity,
   ChevronRight,
   Wrench,
+  Users,
 } from "lucide-react";
 
 const NAV = [
@@ -40,6 +41,11 @@ const NAV = [
     label: "MERMA",
     href: "/merma",
     icon: TrendingUp,
+  },
+  {
+    label: "RRHH",
+    href: "/rrhh",
+    icon: Users,
   },
 ];
 

@@ -50,8 +50,8 @@ from core.cache import cache
 
 router = APIRouter()
 
-_SNAP_TTL = 600
-_BAT_TTL  = 1800
+_SNAP_TTL = 3600   # 1 hora (datos cambian ~1 vez por día)
+_BAT_TTL  = 7200   # 2 horas
 
 
 # ==========================================================

@@ -52,6 +52,7 @@ from api.validaciones import router as validaciones_router
 from api.diagnosticos import router as diagnosticos_router
 from api.acciones     import router as acciones_router
 from api.merma        import router as merma_router
+from api.rrhh         import router as rrhh_router
 
 
 # ==========================================================
@@ -99,6 +100,13 @@ async def lifespan(app: FastAPI):
         print(f"  OpenAI Key:  {'✅ Configurada' if key else '⚠️  No encontrada'}")
     except Exception as e:
         print(f"  OpenAI Key:  ❌ Error: {e}")
+
+    try:
+        from core.rrhh_db import migrate as rrhh_migrate
+        rrhh_migrate()
+        print("  RRHH DB:     ✅ Migraciones aplicadas")
+    except Exception as e:
+        print(f"  RRHH DB:     ⚠️  Error en migración: {e}")
 
     # Precalentar caché
     din_ok = None
@@ -261,6 +269,12 @@ app.include_router(
     merma_router,
     prefix = "/api/merma",
     tags   = ["MERMA — Dashboard de análisis de merma"],
+)
+
+app.include_router(
+    rrhh_router,
+    prefix = "/api/rrhh",
+    tags   = ["RRHH — Guardias y partes mensuales"],
 )
 
 

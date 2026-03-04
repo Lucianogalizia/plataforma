@@ -570,6 +570,233 @@ export const api = {
       niv_count: number;
       uptime_seg: number;
     }>("/api/info", 30 * 1000),
+
+  // ==========================================================
+  // RRHH — Guardias
+  // TTLs alineados con el backend para que frontend y backend
+  // expiren al mismo tiempo y no haya datos rancios.
+  // ==========================================================
+
+  // Auth
+  rrhhLogin: (legajo: string, cuil: string) =>
+    apiFetch<{ ok: boolean; user: RRHHUser }>("/api/rrhh/login", {
+      method: "POST",
+      body: JSON.stringify({ legajo, cuil }),
+    }),
+
+  // Períodos (1 hora — estático dentro del día)
+  rrhhPeriodos: (n = 8) =>
+    apiGetCached<{ actual: string; periodos: RRHHPeriodo[] }>(
+      `/api/rrhh/periodos?n=${n}`, 60 * 60 * 1000
+    ),
+
+  // Personal (30 min)
+  rrhhPersonal: () =>
+    apiGetCached<{ personal: RRHHPersona[] }>("/api/rrhh/personal", 30 * 60 * 1000),
+
+  rrhhImportPersonal: (rows: Partial<RRHHPersona>[]) =>
+    apiFetch<{ ok: boolean; insertados: number; actualizados: number }>(
+      "/api/rrhh/personal/import",
+      { method: "POST", body: JSON.stringify({ rows }) }
+    ).then(r => { clearApiCache("/api/rrhh/personal"); return r; }),
+
+  // Parte — leer (5 min)
+  rrhhGetParte: (legajo: string, periodo: string) =>
+    apiGetCached<RRHHParte>(
+      `/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}`, 5 * 60 * 1000
+    ),
+
+  // Parte — guardar borrador (invalida parte + bitácora)
+  rrhhGuardarParte: (legajo: string, periodo: string, items: RRHHItem[]) =>
+    apiFetch<{ ok: boolean; estado: string; parte: RRHHParte }>(
+      `/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}/guardar`,
+      { method: "POST", body: JSON.stringify({ items }) }
+    ).then(r => {
+      clearApiCache(`/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}`);
+      clearApiCache(`/api/rrhh/bitacora/${encodeURIComponent(legajo)}`);
+      return r;
+    }),
+
+  // Parte — enviar a aprobación
+  rrhhEnviarParte: (legajo: string, periodo: string, items: RRHHItem[]) =>
+    apiFetch<{ ok: boolean; estado: string; parte: RRHHParte }>(
+      `/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}/enviar`,
+      { method: "POST", body: JSON.stringify({ items }) }
+    ).then(r => {
+      clearApiCache(`/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}`);
+      clearApiCache(`/api/rrhh/bitacora/${encodeURIComponent(legajo)}`);
+      clearApiCache("/api/rrhh/equipo");  // invalida pendientes del líder
+      return r;
+    }),
+
+  // Parte líder — guardar propio (auto-aprobado)
+  rrhhGuardarParteLider: (legajo: string, periodo: string, items: RRHHItem[]) =>
+    apiFetch<{ ok: boolean; estado: string; parte: RRHHParte }>(
+      `/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}/guardar-lider`,
+      { method: "POST", body: JSON.stringify({ items }) }
+    ).then(r => {
+      clearApiCache(`/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}`);
+      clearApiCache(`/api/rrhh/bitacora/${encodeURIComponent(legajo)}`);
+      clearApiCache(`/api/rrhh/consolidado`);
+      return r;
+    }),
+
+  // Aprobar (líder)
+  rrhhAprobar: (legajo: string, periodo: string, aprobadorLegajo: string) =>
+    apiFetch<{ ok: boolean; estado: string }>(
+      `/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}/aprobar`,
+      { method: "POST", body: JSON.stringify({ aprobador_legajo: aprobadorLegajo }) }
+    ).then(r => {
+      clearApiCache(`/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}`);
+      clearApiCache(`/api/rrhh/bitacora/${encodeURIComponent(legajo)}`);
+      clearApiCache("/api/rrhh/equipo");
+      clearApiCache("/api/rrhh/consolidado");
+      return r;
+    }),
+
+  // Rechazar (líder)
+  rrhhRechazar: (legajo: string, periodo: string, aprobadorLegajo: string, comentario: string) =>
+    apiFetch<{ ok: boolean; estado: string }>(
+      `/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}/rechazar`,
+      { method: "POST", body: JSON.stringify({ aprobador_legajo: aprobadorLegajo, comentario }) }
+    ).then(r => {
+      clearApiCache(`/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}`);
+      clearApiCache(`/api/rrhh/bitacora/${encodeURIComponent(legajo)}`);
+      clearApiCache("/api/rrhh/equipo");
+      return r;
+    }),
+
+  // Bitácora (5 min)
+  rrhhBitacora: (legajo: string) =>
+    apiGetCached<{ legajo: string; partes: RRHHBitacoraItem[] }>(
+      `/api/rrhh/bitacora/${encodeURIComponent(legajo)}`, 5 * 60 * 1000
+    ),
+
+  // Pendientes del líder (2 min — necesita ver novedades rápido)
+  rrhhPendientes: (leaderLegajo: string) =>
+    apiGetCached<{ leader_legajo: string; pendientes: RRHHPendiente[] }>(
+      `/api/rrhh/equipo/${encodeURIComponent(leaderLegajo)}/pendientes`, 2 * 60 * 1000
+    ),
+
+  // Consolidado (5 min)
+  rrhhConsolidado: (leaderLegajo: string, periodo: string) =>
+    apiGetCached<RRHHConsolidado>(
+      `/api/rrhh/consolidado/${encodeURIComponent(leaderLegajo)}/${periodo}`, 5 * 60 * 1000
+    ),
 };
 
 export default api;
+
+// ==========================================================
+// TIPOS RRHH
+// ==========================================================
+
+export interface RRHHUser {
+  legajo:        string;
+  nombre:        string;
+  leader_legajo: string;
+  funcion?:      string;
+  role:          "empleado" | "lider";
+}
+
+export interface RRHHPeriodo {
+  id:      string;
+  display: string;
+  start:   string;
+  end:     string;
+}
+
+export interface RRHHPersona {
+  legajo:        string;
+  cuil:          string;
+  nombre:        string;
+  leader_legajo: string;
+  funcion?:      string;
+  origen?:       string;
+  lugar_trabajo?: string;
+}
+
+export interface RRHHItem {
+  fecha:      string;
+  tipo:       "G" | "F" | "D" | "HO" | "HV" | "HE";
+  valor_num?: number;
+  comentario?: string;
+}
+
+export interface RRHHGrillaRow {
+  fecha:      string;
+  G:          boolean;
+  F:          boolean;
+  D:          boolean;
+  HO:         boolean;
+  HV:         number;
+  HE:         number;
+  comentario: string;
+}
+
+export interface RRHHTotales {
+  G: number; F: number; D: number; HO: number; HV: number; HE: number;
+}
+
+export interface RRHHParte {
+  legajo:             string;
+  periodo:            string;
+  periodo_display:    string;
+  periodo_inicio:     string;
+  periodo_fin:        string;
+  estado:             "BORRADOR" | "ENVIADO" | "APROBADO" | "RECHAZADO";
+  submitted_at?:      string;
+  approved_at?:       string;
+  approved_by?:       string;
+  rejection_comment?: string;
+  grilla:             RRHHGrillaRow[];
+  totales:            RRHHTotales;
+}
+
+export interface RRHHBitacoraItem {
+  periodo:              string;
+  periodo_display:      string;
+  periodo_inicio:       string;
+  periodo_fin:          string;
+  estado:               string;
+  submitted_at?:        string;
+  approved_at?:         string;
+  approved_by_nombre?:  string;
+  rejection_comment?:   string;
+}
+
+export interface RRHHPendiente {
+  legajo:          string;
+  nombre:          string;
+  periodo:         string;
+  periodo_display: string;
+  periodo_inicio:  string;
+  periodo_fin:     string;
+  estado:          string;
+  submitted_at?:   string;
+}
+
+export interface RRHHConsolidadoEmpleado {
+  legajo:      string;
+  nombre:      string;
+  funcion:     string;
+  estado:      string;
+  approved_at?: string;
+  G: number; F: number; D: number; HO: number; HV: number; HE: number;
+  dias: {
+    fecha:      string;
+    tipos:      string[];
+    HV:         number;
+    HE:         number;
+    comentario: string;
+  }[];
+}
+
+export interface RRHHConsolidado {
+  leader_legajo:   string;
+  periodo:         string;
+  periodo_display: string;
+  periodo_inicio:  string;
+  periodo_fin:     string;
+  empleados:       RRHHConsolidadoEmpleado[];
+}

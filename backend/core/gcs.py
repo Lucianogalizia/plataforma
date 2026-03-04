@@ -15,6 +15,11 @@ import tempfile
 from pathlib import Path
 from functools import lru_cache
 
+from core.cache import cache as _cache
+
+# TTL para datos que cambian ~1 vez por día (1 hora)
+_DATA_TTL = 3600
+
 # ---------- Variables de entorno ----------
 GCS_BUCKET = os.environ.get("DINAS_BUCKET", "").strip()
 GCS_PREFIX = os.environ.get("DINAS_GCS_PREFIX", "").strip().strip("/")
@@ -298,32 +303,45 @@ def resolve_existing_path(path_str: str | None) -> str | None:
 def load_din_index():
     """
     Carga el índice DIN desde local (parquet > csv) o GCS.
+    Resultado cacheado en memoria (_DATA_TTL).
 
     Returns:
         pd.DataFrame con el índice de archivos .din
     """
+    cached = _cache.get("gcs_din_index")
+    if cached is not None:
+        return cached.copy()
+
     import pandas as pd
+
+    result = pd.DataFrame()
 
     # Local parquet
     if os.path.exists(INDEX_PARQUET_LOCAL):
         try:
-            return pd.read_parquet(INDEX_PARQUET_LOCAL)
+            result = pd.read_parquet(INDEX_PARQUET_LOCAL)
+            _cache.set("gcs_din_index", result, ttl=_DATA_TTL)
+            return result.copy()
         except Exception:
             pass
 
     # Local CSV
     if os.path.exists(INDEX_CSV_LOCAL):
-        return pd.read_csv(
+        result = pd.read_csv(
             INDEX_CSV_LOCAL,
             parse_dates=["mtime", "din_datetime"],
             dayfirst=True,
             keep_default_na=True,
         )
+        _cache.set("gcs_din_index", result, ttl=_DATA_TTL)
+        return result.copy()
 
     # GCS
     if GCS_BUCKET:
         try:
-            return read_parquet_any("", get_index_parquet_gcs())
+            result = read_parquet_any("", get_index_parquet_gcs())
+            _cache.set("gcs_din_index", result, ttl=_DATA_TTL)
+            return result.copy()
         except Exception:
             return pd.DataFrame()
 
@@ -333,18 +351,27 @@ def load_din_index():
 def load_niv_index():
     """
     Carga el índice NIV desde local o GCS.
+    Resultado cacheado en memoria (_DATA_TTL).
 
     Returns:
         pd.DataFrame con el índice de archivos .niv
     """
+    cached = _cache.get("gcs_niv_index")
+    if cached is not None:
+        return cached.copy()
+
     import pandas as pd
 
     if os.path.exists(NIV_INDEX_LOCAL):
-        return pd.read_parquet(NIV_INDEX_LOCAL)
+        result = pd.read_parquet(NIV_INDEX_LOCAL)
+        _cache.set("gcs_niv_index", result, ttl=_DATA_TTL)
+        return result.copy()
 
     if GCS_BUCKET:
         try:
-            return read_parquet_any("", get_niv_index_gcs())
+            result = read_parquet_any("", get_niv_index_gcs())
+            _cache.set("gcs_niv_index", result, ttl=_DATA_TTL)
+            return result.copy()
         except Exception:
             return pd.DataFrame()
 
@@ -356,10 +383,15 @@ def load_snapshot():
     Lee el snapshot.parquet pregenerado por build_snapshot.py.
     Contiene una fila por pozo con la última medición + todos los extras.
     Carga en ~3 segundos en vez de 5 minutos.
+    Resultado cacheado en memoria (_DATA_TTL).
 
     Returns:
         pd.DataFrame con el snapshot, vacío si no existe.
     """
+    cached = _cache.get("gcs_snapshot")
+    if cached is not None:
+        return cached.copy()
+
     import pandas as pd
 
     gs_url = get_snapshot_gcs()
@@ -368,7 +400,9 @@ def load_snapshot():
 
     try:
         lp = gcs_download_to_temp(gs_url)
-        return pd.read_parquet(lp)
+        result = pd.read_parquet(lp)
+        _cache.set("gcs_snapshot", result, ttl=_DATA_TTL)
+        return result.copy()
     except Exception:
         return pd.DataFrame()
 
@@ -405,7 +439,12 @@ def load_all_diags_from_gcs(pozos_interes: list[str]) -> dict[str, dict]:
     """
     OPTIMIZADO: Lista todos los archivos de la carpeta diagnosticos/ de una sola vez.
     Esto evita el Timeout (Error 500) y es mucho más rápido.
+    Resultado cacheado en memoria (_DATA_TTL).
     """
+    cached = _cache.get("gcs_all_diags")
+    if cached is not None:
+        return {k: v for k, v in cached.items() if k in pozos_interes}
+
     import json
     client = get_gcs_client()
     if not client or not GCS_BUCKET:
@@ -431,22 +470,22 @@ def load_all_diags_from_gcs(pozos_interes: list[str]) -> dict[str, dict]:
             if not parts: continue
             pozo_id = parts[0]
 
-            # Solo procesamos si el pozo está en nuestra lista de interés
-            if pozo_id in pozos_interes:
-                try:
-                    data = json.loads(blob.download_as_text(encoding="utf-8"))
-                    if "error" not in data:
-                        results[pozo_id] = data
-                except:
-                    continue
+            try:
+                data = json.loads(blob.download_as_text(encoding="utf-8"))
+                if "error" not in data:
+                    results[pozo_id] = data
+            except:
+                continue
     except Exception as e:
         print(f"Error masivo cargando diagnósticos: {e}")
 
-    return results
+    _cache.set("gcs_all_diags", results, ttl=_DATA_TTL)
+    return {k: v for k, v in results.items() if k in pozos_interes}
 
 def save_diag_to_gcs(no_key: str, diag: dict) -> bool:
     """
     Guarda el JSON de diagnóstico de un pozo en GCS.
+    Invalida el caché de diagnósticos tras guardar.
     """
     import json
     client = get_gcs_client()
@@ -465,6 +504,7 @@ def save_diag_to_gcs(no_key: str, diag: dict) -> bool:
             json.dumps(diag, ensure_ascii=False, indent=2, default=str),
             content_type="application/json",
         )
+        _cache.delete("gcs_all_diags")
         return True
     except Exception:
         return False
@@ -482,10 +522,19 @@ def _val_blob_name(no_key: str) -> str:
 def load_validaciones(no_key: str) -> dict:
     """
     Carga el JSON de validaciones de un pozo desde GCS.
+    Resultado cacheado en memoria (_DATA_TTL).
+    Devuelve una COPIA para evitar que set_validacion (in-place) corrompa el caché.
 
     Returns:
         dict con validaciones, o {} si no existe.
     """
+    import copy
+
+    cache_key = f"gcs_val_{no_key}"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return copy.deepcopy(cached)
+
     import json
 
     client = get_gcs_client()
@@ -495,15 +544,26 @@ def load_validaciones(no_key: str) -> dict:
     try:
         blob = client.bucket(GCS_BUCKET).blob(_val_blob_name(no_key))
         if not blob.exists():
-            return {}
-        return json.loads(blob.download_as_text(encoding="utf-8"))
+            result = {}
+        else:
+            result = json.loads(blob.download_as_text(encoding="utf-8"))
+        _cache.set(cache_key, result, ttl=_DATA_TTL)
+        return result
     except Exception:
         return {}
+
+
+def invalidate_validaciones_cache(no_key: str | None = None) -> None:
+    """Invalida caché de validaciones (individual o todas)."""
+    if no_key:
+        _cache.delete(f"gcs_val_{no_key}")
+    _cache.delete("gcs_all_val")
 
 
 def save_validaciones(no_key: str, data: dict) -> bool:
     """
     Guarda el JSON de validaciones de un pozo en GCS.
+    Invalida el caché tras guardar.
 
     Returns:
         True si se guardó correctamente, False si hubo error.
@@ -520,6 +580,7 @@ def save_validaciones(no_key: str, data: dict) -> bool:
             json.dumps(data, ensure_ascii=False, indent=2, default=str),
             content_type="application/json",
         )
+        invalidate_validaciones_cache(no_key)
         return True
     except Exception:
         return False
@@ -527,11 +588,18 @@ def save_validaciones(no_key: str, data: dict) -> bool:
 
 def load_all_validaciones(pozos: list[str]) -> dict[str, dict]:
     """
-    Carga las validaciones de todos los pozos indicados desde GCS.
+    OPTIMIZADO: Lista todos los archivos de la carpeta validaciones/ de una sola vez.
+    Mismo patrón batch que load_all_diags_from_gcs.
+    Resultado cacheado en memoria (_DATA_TTL).
 
     Returns:
         dict { no_key: val_dict }
     """
+    cached = _cache.get("gcs_all_val")
+    if cached is not None:
+        # Filtrar solo los pozos solicitados
+        return {k: v for k, v in cached.items() if k in pozos}
+
     import json
 
     client = get_gcs_client()
@@ -539,19 +607,33 @@ def load_all_validaciones(pozos: list[str]) -> dict[str, dict]:
         return {}
 
     results = {}
-    bucket  = client.bucket(GCS_BUCKET)
+    try:
+        bucket = client.bucket(GCS_BUCKET)
+        prefix = "validaciones/"
+        if GCS_PREFIX:
+            prefix = f"{GCS_PREFIX}/{prefix}"
 
-    for no_key in pozos:
-        try:
-            blob = bucket.blob(_val_blob_name(no_key))
-            if blob.exists():
-                results[no_key] = json.loads(
-                    blob.download_as_text(encoding="utf-8")
-                )
-        except Exception:
-            pass
+        blobs = list(client.list_blobs(GCS_BUCKET, prefix=prefix))
 
-    return results
+        for blob in blobs:
+            if not blob.name.endswith("validaciones.json"):
+                continue
+
+            parts = blob.name.replace(prefix, "").split("/")
+            if not parts:
+                continue
+            no_key = parts[0]
+
+            try:
+                data = json.loads(blob.download_as_text(encoding="utf-8"))
+                results[no_key] = data
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"Error batch cargando validaciones: {e}")
+
+    _cache.set("gcs_all_val", results, ttl=_DATA_TTL)
+    return {k: v for k, v in results.items() if k in pozos}
 
 
 # ==========================================================
@@ -562,10 +644,15 @@ def load_coords_repo(base_dir: Path | None = None) -> "pd.DataFrame":
     """
     Carga el Excel de coordenadas de pozos desde el repo.
     Busca en múltiples ubicaciones posibles.
+    Resultado cacheado en memoria (_DATA_TTL).
 
     Returns:
         pd.DataFrame con columnas: nombre_corto, GEO_LATITUDE, GEO_LONGITUDE, nivel_5
     """
+    cached = _cache.get("gcs_coords_repo")
+    if cached is not None:
+        return cached.copy()
+
     import pandas as pd
 
     if base_dir is None:
@@ -580,13 +667,17 @@ def load_coords_repo(base_dir: Path | None = None) -> "pd.DataFrame":
     for p in candidates:
         try:
             if p.exists():
-                return pd.read_excel(p)
+                result = pd.read_excel(p)
+                _cache.set("gcs_coords_repo", result, ttl=_DATA_TTL)
+                return result.copy()
         except Exception:
             pass
 
     # Búsqueda recursiva como último recurso
     hits = list(base_dir.rglob("Nombres-Pozo_con_coordenadas.xlsx"))
     if hits:
-        return pd.read_excel(hits[0])
+        result = pd.read_excel(hits[0])
+        _cache.set("gcs_coords_repo", result, ttl=_DATA_TTL)
+        return result.copy()
 
     return pd.DataFrame()

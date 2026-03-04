@@ -138,6 +138,9 @@ async def lifespan(app: FastAPI):
         from api.validaciones import _load_snap_map
         _load_snap_map()
 
+        from api.din import _build_snapshot_base
+        _build_snapshot_base()
+
         print("  Caché:       ✅ Todo precalentado")
     except Exception as e:
         print(f"  Caché:       ⚠️  Error precalentando extras: {e}")

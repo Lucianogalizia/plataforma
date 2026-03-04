@@ -425,36 +425,16 @@ async def get_historico_sumergencia(pozo: str):
 # GET /api/din/snapshot
 # ==========================================================
 
-@router.get("/snapshot")
-async def get_snapshot(
-    origen: Optional[str] = Query(
-        None,
-        description="Filtrar por origen: DIN, NIV o vacío para todos"
-    ),
-    sum_min: Optional[float] = Query(None, description="Sumergencia mínima"),
-    sum_max: Optional[float] = Query(None, description="Sumergencia máxima"),
-    est_min: Optional[float] = Query(None, description="%Estructura mínimo"),
-    est_max: Optional[float] = Query(None, description="%Estructura máximo"),
-    bal_min: Optional[float] = Query(None, description="%Balance mínimo"),
-    bal_max: Optional[float] = Query(None, description="%Balance máximo"),
-):
+def _build_snapshot_base():
     """
-    Devuelve el snapshot global: última medición por pozo.
-    Incluye extras del snapshot pregenerado por build_snapshot.py.
-
-    Query params:
-        origen:  "DIN" | "NIV" (opcional)
-        sum_min / sum_max: rango de Sumergencia
-        est_min / est_max: rango de %Estructura
-        bal_min / bal_max: rango de %Balance
-
-    Returns:
-        {
-            "total":  int,
-            "snap":   [...],
-            "kpis":   { total_pozos, ultima_din, ultima_niv, con_sumergencia, con_pb }
-        }
+    Construye el snapshot global procesado (última medición por pozo).
+    Resultado cacheado en memoria (_SNAP_TTL).
+    Incluye: consolidado, groupby, merge extras, antigüedad, batería.
     """
+    cached = cache.get("din_snapshot_base")
+    if cached is not None:
+        return cached.copy()
+
     din_ok, niv_ok, col_map = _load_indexes_with_keys()
 
     snap = build_global_consolidated(
@@ -464,7 +444,7 @@ async def get_snapshot(
     )
 
     if snap.empty:
-        return {"total": 0, "snap": [], "kpis": {}}
+        return pd.DataFrame()
 
     snap["DT_plot"] = pd.to_datetime(snap["DT_plot"], errors="coerce")
     snap = (
@@ -515,6 +495,45 @@ async def get_snapshot(
         )
     else:
         snap["Bateria"] = None
+
+    cache.set("din_snapshot_base", snap, ttl=_SNAP_TTL)
+    return snap.copy()
+
+
+@router.get("/snapshot")
+async def get_snapshot(
+    origen: Optional[str] = Query(
+        None,
+        description="Filtrar por origen: DIN, NIV o vacío para todos"
+    ),
+    sum_min: Optional[float] = Query(None, description="Sumergencia mínima"),
+    sum_max: Optional[float] = Query(None, description="Sumergencia máxima"),
+    est_min: Optional[float] = Query(None, description="%Estructura mínimo"),
+    est_max: Optional[float] = Query(None, description="%Estructura máximo"),
+    bal_min: Optional[float] = Query(None, description="%Balance mínimo"),
+    bal_max: Optional[float] = Query(None, description="%Balance máximo"),
+):
+    """
+    Devuelve el snapshot global: última medición por pozo.
+    Incluye extras del snapshot pregenerado por build_snapshot.py.
+
+    Query params:
+        origen:  "DIN" | "NIV" (opcional)
+        sum_min / sum_max: rango de Sumergencia
+        est_min / est_max: rango de %Estructura
+        bal_min / bal_max: rango de %Balance
+
+    Returns:
+        {
+            "total":  int,
+            "snap":   [...],
+            "kpis":   { total_pozos, ultima_din, ultima_niv, con_sumergencia, con_pb }
+        }
+    """
+    snap = _build_snapshot_base()
+
+    if snap.empty:
+        return {"total": 0, "snap": [], "kpis": {}}
 
     # --- Filtros ---
     if origen:

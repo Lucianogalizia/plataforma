@@ -464,7 +464,7 @@ export const api = {
     ),
 
   getHistorialValidaciones: (pozos: string) =>
-    apiFetch<{ total: number; historial: Record<string, unknown>[] }>(
+    apiGetCached<{ total: number; historial: Record<string, unknown>[] }>(
       `/api/validaciones/historial?pozos=${encodeURIComponent(pozos)}`
     ),
 
@@ -497,7 +497,7 @@ export const api = {
     if (params?.baterias) qs.set("baterias", params.baterias);
     if (params?.solo_validadas)    qs.set("solo_validadas",    "true");
     if (params?.solo_no_validadas) qs.set("solo_no_validadas", "true");
-    return apiFetch<{
+    return apiGetCached<{
       total: number;
       filas: FilaValidacion[];
     }>(`/api/validaciones/tabla?${qs}`);

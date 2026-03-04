@@ -60,6 +60,30 @@ const TIPOS = ["Superficie", "Fondo"];
 const TIPOS_ACCION = ["Optimización", "Operativa"];
 const RECURSOS = ["eléctricos", "Grúa", "Operador BES", "Operador PCP", "Pulling", "WO", "químicos", "CT"];
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+// --- Caché local para GETs (evita requests duplicados) ---
+const _getCache = new Map<string, { ts: number; data: unknown }>();
+const _inflight = new Map<string, Promise<unknown>>();
+const _GET_TTL = 3 * 60 * 1000; // 3 minutos
+
+async function cachedGet<T>(url: string): Promise<T> {
+  const now = Date.now();
+  const hit = _getCache.get(url);
+  if (hit && now - hit.ts < _GET_TTL) return hit.data as T;
+  const inf = _inflight.get(url);
+  if (inf) return inf as Promise<T>;
+  const p: Promise<T> = fetch(url).then(r => {
+    if (!r.ok) throw new Error(`Error ${r.status}`);
+    return r.json() as Promise<T>;
+  }).then(data => {
+    _getCache.set(url, { ts: Date.now(), data });
+    return data;
+  }).finally(() => _inflight.delete(url));
+  _inflight.set(url, p as Promise<unknown>);
+  return p;
+}
+
+function clearAccionesCache() { _getCache.clear(); }
 const FORM_EMPTY: FormData = {
   nombre_pozo: "", bateria: "", sist_extraccion: "",
   fecha_accion: "", fecha_realizacion: "", fecha_fin: "", tipo: "",
@@ -545,9 +569,9 @@ export default function AccionesPage() {
       const qs = new URLSearchParams();
       if (filterBusqueda) qs.set("busqueda", filterBusqueda);
       const [filtRes, allRes, kpisRes] = await Promise.all([
-        fetch(API + "/api/acciones?" + qs).then(r => r.json()),
-        fetch(API + "/api/acciones").then(r => r.json()),
-        fetch(API + "/api/acciones/kpis").then(r => r.json()),
+        cachedGet<{ acciones: Accion[] }>(API + "/api/acciones?" + qs),
+        cachedGet<{ acciones: Accion[] }>(API + "/api/acciones"),
+        cachedGet<{ total: number; en_proceso: number; finalizadas: number }>(API + "/api/acciones/kpis"),
       ]);
       setAcciones(filtRes.acciones ?? []);
       setAll(allRes.acciones ?? []);
@@ -559,7 +583,7 @@ export default function AccionesPage() {
 
   const fetchPozos = useCallback(async () => {
     try {
-      const res = await fetch(API + "/api/acciones/pozos-lista").then(r => r.json());
+      const res = await cachedGet<{ pozos: PozoItem[] }>(API + "/api/acciones/pozos-lista");
       setPozos(res.pozos ?? []);
     } catch { /* silencioso */ }
   }, []);
@@ -638,6 +662,7 @@ export default function AccionesPage() {
         }),
       });
       if (!res.ok) throw new Error(await res.text());
+      clearAccionesCache();
       setModalOpen(false); setForm(FORM_EMPTY); fetchAll();
     } catch (e: unknown) { alert(e instanceof Error ? e.message : "Error"); }
     finally { setSaving(false); }
@@ -675,6 +700,7 @@ export default function AccionesPage() {
         }),
       });
       if (!res.ok) throw new Error(await res.text());
+      clearAccionesCache();
       setEditOpen(false); setEditId(null); setForm(FORM_EMPTY); fetchAll();
     } catch (e: unknown) { alert(e instanceof Error ? e.message : "Error"); }
     finally { setSaving(false); }
@@ -686,6 +712,7 @@ export default function AccionesPage() {
     try {
       const res = await fetch(API + "/api/acciones/" + deleteId, { method: "DELETE" });
       if (!res.ok) throw new Error(await res.text());
+      clearAccionesCache();
       setDeleteOpen(false); setDeleteId(null); setExpandedId(null); setExpandedAccId(null);
       fetchAll();
     } catch (e: unknown) { alert(e instanceof Error ? e.message : "Error"); }

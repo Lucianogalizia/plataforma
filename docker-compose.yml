@@ -4,10 +4,11 @@ version: "3.9"
 # docker-compose.yml — Plataforma DINA (desarrollo local)
 #
 # Levanta:
+#   - postgres (Postgres :5432)   ← módulo RRHH
 #   - backend  (FastAPI en :8000)
 #   - frontend (Next.js en :3000)
 #
-# Para producción usar Cloud Run (un servicio por container).
+# Para producción usar Cloud Run + Cloud SQL.
 #
 # USO:
 #   docker-compose up --build
@@ -16,6 +17,30 @@ version: "3.9"
 # ==========================================================
 
 services:
+
+  # ──────────────────────────────────────────────────────────
+  # PostgreSQL — módulo RRHH/Guardias
+  # ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: dina-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB:       ${RRHH_DB_NAME:-dina_rrhh}
+      POSTGRES_USER:     ${RRHH_DB_USER:-dina}
+      POSTGRES_PASSWORD: ${RRHH_DB_PASSWORD:-dina_local}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RRHH_DB_USER:-dina} -d ${RRHH_DB_NAME:-dina_rrhh}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - dina-net
 
   # ──────────────────────────────────────────────────────────
   # Backend FastAPI
@@ -28,18 +53,26 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Variables de entorno (copiá .env.example → .env y completá)
+      # GCS / GCP
       - DINAS_BUCKET=${DINAS_BUCKET}
       - DINAS_GCS_PREFIX=${DINAS_GCS_PREFIX:-interfaz_dinas}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
       - OPENAI_SECRET_NAME=${OPENAI_SECRET_NAME:-OPENAI_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - CORS_ORIGINS=http://localhost:3000
+      # RRHH — Postgres
+      - RRHH_DB_HOST=postgres
+      - RRHH_DB_PORT=5432
+      - RRHH_DB_NAME=${RRHH_DB_NAME:-dina_rrhh}
+      - RRHH_DB_USER=${RRHH_DB_USER:-dina}
+      - RRHH_DB_PASSWORD=${RRHH_DB_PASSWORD:-dina_local}
     volumes:
-      # Montar credentials de GCP en desarrollo (Application Default Credentials)
       - ${GOOGLE_APPLICATION_CREDENTIALS:-/dev/null}:/gcp-credentials.json:ro
     env_file:
       - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
@@ -86,9 +119,13 @@ services:
     env_file:
       - .env
     profiles:
-      - scheduler  # Solo corre con: docker-compose --profile scheduler up scheduler
+      - scheduler
     networks:
       - dina-net
+
+volumes:
+  postgres_data:
+    driver: local
 
 networks:
   dina-net:

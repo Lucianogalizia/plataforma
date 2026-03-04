@@ -463,6 +463,13 @@ export const api = {
       `/api/validaciones/${encodeURIComponent(pozo)}`
     ),
 
+  getValidacionesBatch: (pozos: string[]) =>
+    apiGetCached<{
+      validaciones: Record<string, { mediciones: Record<string, ValidacionEstado> }>;
+    }>(
+      `/api/validaciones/batch?pozos=${encodeURIComponent(pozos.join(","))}`
+    ),
+
   getHistorialValidaciones: (pozos: string) =>
     apiGetCached<{ total: number; historial: Record<string, unknown>[] }>(
       `/api/validaciones/historial?pozos=${encodeURIComponent(pozos)}`

@@ -23,6 +23,9 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from core.gcs import GCS_BUCKET, GCS_PREFIX, get_gcs_client
+from core.cache import cache as _cache
+
+_ACCIONES_TTL = 3600  # 1 hora
 
 
 # ==========================================================
@@ -41,10 +44,18 @@ def _acciones_blob_name() -> str:
 def load_acciones() -> list[dict]:
     """
     Carga todas las acciones desde GCS.
+    Resultado cacheado en memoria (_ACCIONES_TTL).
+    Devuelve una COPIA para evitar que mutaciones corrompan el caché.
 
     Returns:
         Lista de dicts con las acciones, [] si no existe aún.
     """
+    import copy
+
+    cached = _cache.get("acciones_all")
+    if cached is not None:
+        return copy.deepcopy(cached)
+
     client = get_gcs_client()
     if not client or not GCS_BUCKET:
         return []
@@ -54,9 +65,16 @@ def load_acciones() -> list[dict]:
         if not blob.exists():
             return []
         data = json.loads(blob.download_as_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
+        result = data if isinstance(data, list) else []
+        _cache.set("acciones_all", result, ttl=_ACCIONES_TTL)
+        return result
     except Exception:
         return []
+
+
+def _invalidate_acciones_cache():
+    """Invalida el caché de acciones tras una escritura."""
+    _cache.delete("acciones_all")
 
 
 # ==========================================================
@@ -66,6 +84,7 @@ def load_acciones() -> list[dict]:
 def save_acciones(acciones: list[dict]) -> bool:
     """
     Guarda la lista completa de acciones en GCS.
+    Invalida el caché tras guardar.
 
     Returns:
         True si se guardó correctamente.
@@ -80,6 +99,7 @@ def save_acciones(acciones: list[dict]) -> bool:
             json.dumps(acciones, ensure_ascii=False, indent=2, default=str),
             content_type="application/json",
         )
+        _invalidate_acciones_cache()
         return True
     except Exception:
         return False

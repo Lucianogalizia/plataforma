@@ -60,9 +60,9 @@ export default function AlertasLlenadoPage() {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col" style={{ height: "100vh" }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-[#334155]">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-[#334155] flex-shrink-0">
         <div>
           <h1 className="text-xl font-bold text-slate-100">
             Alertas – Llenado de Bomba BM
@@ -96,8 +96,8 @@ export default function AlertasLlenadoPage() {
         </button>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 relative">
+      {/* Content — ocupa todo el resto */}
+      <div className="flex-1 relative min-h-0">
         {loading && !info ? (
           <div className="absolute inset-0 flex items-center justify-center bg-[#0f172a]">
             <div className="text-center">
@@ -109,7 +109,8 @@ export default function AlertasLlenadoPage() {
           <iframe
             key={iframeKey}
             src={`${API_URL}/api/alertas-llenado/dashboard`}
-            className="w-full h-full border-0"
+            className="w-full border-0"
+            style={{ height: "100%" }}
             title="Alertas Llenado de Bomba BM"
             sandbox="allow-scripts allow-same-origin"
           />

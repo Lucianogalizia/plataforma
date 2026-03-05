@@ -153,16 +153,80 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"  Caché:       ⚠️  Error precalentando extras: {e}")
 
-    # Precalentar caché RRHH (personal + períodos — los más lentos en primera carga)
+    # Precalentar caché RRHH completo
     try:
-        from api.rrhh import _K_PERSONAL, _K_PERIODOS, _TTL_PERSONAL, _TTL_PERIODOS
-        from core.rrhh_db import list_personal, current_period_id, recent_periods
+        from api.rrhh import (
+            _K_PERSONAL, _K_PERIODOS, _TTL_PERSONAL, _TTL_PERIODOS,
+            _TTL_BITACORA, _TTL_PENDIENTE, _TTL_CONSOL,
+            _k_bitacora, _k_pendientes, _k_consolidado,
+            _build_parte_response,
+        )
+        from core.rrhh_db import (
+            list_personal, current_period_id, recent_periods,
+            get_leader_legajos, list_bitacora, list_pendientes_lider,
+            get_consolidado, period_display, period_bounds,
+        )
         from core.cache import cache
+
+        # Personal + períodos
         personal = list_personal()
         cache.set(_K_PERSONAL, {"personal": personal}, ttl=_TTL_PERSONAL)
-        periodos = {"actual": current_period_id(), "periodos": recent_periods(8)}
-        cache.set(_K_PERIODOS, periodos, ttl=_TTL_PERIODOS)
+        periodo_actual = current_period_id()
+        periodos_data = {"actual": periodo_actual, "periodos": recent_periods(8)}
+        cache.set(_K_PERIODOS, periodos_data, ttl=_TTL_PERIODOS)
         print(f"  RRHH Caché:  ✅ Personal ({len(personal)} personas) + períodos listos")
+
+        # Bitácora de todos los empleados
+        legajos_todos = [p["legajo"] for p in personal]
+        for legajo in legajos_todos:
+            try:
+                partes = list_bitacora(legajo)
+                result_partes = []
+                for p in partes:
+                    start, end = period_bounds(p["periodo"])
+                    result_partes.append({
+                        **p,
+                        "periodo_display": period_display(p["periodo"]),
+                        "periodo_inicio":  start.isoformat(),
+                        "periodo_fin":     end.isoformat(),
+                    })
+                cache.set(_k_bitacora(legajo), {"legajo": legajo, "partes": result_partes}, ttl=_TTL_BITACORA)
+            except Exception:
+                pass
+        print(f"  RRHH Caché:  ✅ Bitácora ({len(legajos_todos)} empleados) lista")
+
+        # Pendientes + Consolidado de todos los líderes
+        leaders = get_leader_legajos()
+        for leader in leaders:
+            try:
+                rows = list_pendientes_lider(leader)
+                result_rows = []
+                for r in rows:
+                    start, end = period_bounds(r["periodo"])
+                    result_rows.append({
+                        **r,
+                        "periodo_display": period_display(r["periodo"]),
+                        "periodo_inicio":  start.isoformat(),
+                        "periodo_fin":     end.isoformat(),
+                    })
+                cache.set(_k_pendientes(leader), {"leader_legajo": leader, "pendientes": result_rows}, ttl=_TTL_PENDIENTE)
+            except Exception:
+                pass
+            try:
+                data = get_consolidado(leader, periodo_actual)
+                start, end = period_bounds(periodo_actual)
+                cache.set(_k_consolidado(leader, periodo_actual), {
+                    "leader_legajo":   leader,
+                    "periodo":         periodo_actual,
+                    "periodo_display": period_display(periodo_actual),
+                    "periodo_inicio":  start.isoformat(),
+                    "periodo_fin":     end.isoformat(),
+                    "empleados":       data,
+                }, ttl=_TTL_CONSOL)
+            except Exception:
+                pass
+        print(f"  RRHH Caché:  ✅ Pendientes + Consolidado ({len(leaders)} líderes) listos")
+
     except Exception as e:
         print(f"  RRHH Caché:  ⚠️  Error precalentando: {e}")
 

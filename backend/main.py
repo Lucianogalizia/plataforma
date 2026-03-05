@@ -51,8 +51,9 @@ from api.mapa         import router as mapa_router
 from api.validaciones import router as validaciones_router
 from api.diagnosticos import router as diagnosticos_router
 from api.acciones     import router as acciones_router
-from api.merma        import router as merma_router
-from api.rrhh         import router as rrhh_router
+from api.merma           import router as merma_router
+from api.rrhh            import router as rrhh_router
+from api.alertas_llenado import router as alertas_llenado_router
 
 
 # ==========================================================
@@ -363,6 +364,12 @@ app.include_router(
     merma_router,
     prefix = "/api/merma",
     tags   = ["MERMA — Dashboard de análisis de merma"],
+)
+
+app.include_router(
+    alertas_llenado_router,
+    prefix = "/api/alertas-llenado",
+    tags   = ["Alertas Llenado de Bomba BM"],
 )
 
 app.include_router(

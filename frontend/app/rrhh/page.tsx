@@ -1217,20 +1217,26 @@ export default function RRHHPage() {
         </div>
       </div>
 
-      {/* Contenido */}
+      {/* Contenido — CSS hidden para no desmontar tabs y preservar cache */}
       <div className="flex-1 p-6 overflow-auto">
-        {activeTab === "mi-parte" && periodos.length > 0 && (
-          <TabMiParte user={user} periodos={periodos} />
-        )}
-        {activeTab === "bitacora" && <TabBitacora user={user} />}
-        {activeTab === "equipo" && esLider && periodos.length > 0 && (
-          <TabEquipo user={user} />
-        )}
-        {activeTab === "consolidado" && esLider && periodos.length > 0 && (
-          <TabConsolidado user={user} periodos={periodos} />
-        )}
-        {activeTab === "personal" && esLider && (
-          <TabPersonal user={user} />
+        <div className={activeTab === "mi-parte" ? "" : "hidden"}>
+          {periodos.length > 0 && <TabMiParte user={user} periodos={periodos} />}
+        </div>
+        <div className={activeTab === "bitacora" ? "" : "hidden"}>
+          <TabBitacora user={user} />
+        </div>
+        {esLider && (
+          <>
+            <div className={activeTab === "equipo" ? "" : "hidden"}>
+              {periodos.length > 0 && <TabEquipo user={user} />}
+            </div>
+            <div className={activeTab === "consolidado" ? "" : "hidden"}>
+              {periodos.length > 0 && <TabConsolidado user={user} periodos={periodos} />}
+            </div>
+            <div className={activeTab === "personal" ? "" : "hidden"}>
+              <TabPersonal user={user} />
+            </div>
+          </>
         )}
       </div>
     </div>

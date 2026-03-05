@@ -43,6 +43,11 @@ const NAV = [
     icon: TrendingUp,
   },
   {
+    label: "Alertas Llenado BM",
+    href: "/alertas-llenado",
+    icon: Activity,
+  },
+  {
     label: "RRHH",
     href: "/rrhh",
     icon: Users,

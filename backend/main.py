@@ -153,6 +153,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"  Caché:       ⚠️  Error precalentando extras: {e}")
 
+    # Precalentar caché RRHH (personal + períodos — los más lentos en primera carga)
+    try:
+        from api.rrhh import _K_PERSONAL, _K_PERIODOS, _TTL_PERSONAL, _TTL_PERIODOS
+        from core.rrhh_db import list_personal, current_period_id, recent_periods
+        from core.cache import cache
+        personal = list_personal()
+        cache.set(_K_PERSONAL, {"personal": personal}, ttl=_TTL_PERSONAL)
+        periodos = {"actual": current_period_id(), "periodos": recent_periods(8)}
+        cache.set(_K_PERIODOS, periodos, ttl=_TTL_PERIODOS)
+        print(f"  RRHH Caché:  ✅ Personal ({len(personal)} personas) + períodos listos")
+    except Exception as e:
+        print(f"  RRHH Caché:  ⚠️  Error precalentando: {e}")
+
     print(f"  CORS Origins: {CORS_ORIGINS}")
     print("=" * 60)
 

@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 
 ISO_DT    = "%Y-%m-%d %H:%M:%S"
 TIPOS_DIA = ["G", "F", "D", "HO"]
@@ -119,10 +120,23 @@ def _conn_params() -> Dict[str, Any]:
     return params
 
 
+_pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
+
+def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    global _pool
+    if _pool is None or _pool.closed:
+        params = _conn_params()
+        if "dsn" in params:
+            _pool = psycopg2.pool.ThreadedConnectionPool(1, 5, params["dsn"])
+        else:
+            _pool = psycopg2.pool.ThreadedConnectionPool(1, 5, **params)
+    return _pool
+
+
 @contextmanager
 def get_conn():
-    params = _conn_params()
-    conn = psycopg2.connect(**params) if "dsn" not in params else psycopg2.connect(params["dsn"])
+    pool = _get_pool()
+    conn = pool.getconn()
     try:
         yield conn
         conn.commit()
@@ -130,7 +144,7 @@ def get_conn():
         conn.rollback()
         raise
     finally:
-        conn.close()
+        pool.putconn(conn)
 
 
 def _cursor(conn):
@@ -444,12 +458,16 @@ def save_items(legajo: str, periodo: str, items: List[Dict]) -> None:
 def get_consolidado(leader_legajo: str, periodo: str) -> List[Dict]:
     """
     Retorna resumen + detalle por día para cada empleado del equipo.
+    Una sola query para empleados + una sola query para todos los items (sin N+1).
     [{legajo, nombre, funcion, estado, G, F, D, HO, HV, HE, dias:[...]}]
     """
     leader_legajo, periodo = str(leader_legajo).strip(), str(periodo).strip()
+    start, end = period_bounds(periodo)
 
     with get_conn() as conn:
         cur = _cursor(conn)
+
+        # 1 query: todos los empleados del equipo
         cur.execute("""
             SELECT per.legajo, per.nombre, per.funcion,
                    p.estado, p.approved_at
@@ -460,15 +478,33 @@ def get_consolidado(leader_legajo: str, periodo: str) -> List[Dict]:
             ORDER BY per.nombre
         """, (periodo, leader_legajo))
         empleados = [dict(r) for r in cur.fetchall()]
+
+        # 1 query: todos los items del período para todo el equipo
+        legajos = [e["legajo"] for e in empleados]
+        items_all: List[Dict] = []
+        if legajos:
+            cur.execute("""
+                SELECT * FROM rrhh_items
+                WHERE legajo = ANY(%s) AND fecha >= %s AND fecha <= %s
+                ORDER BY legajo, fecha, tipo
+            """, (legajos, start.isoformat(), end.isoformat()))
+            items_all = [dict(r) for r in cur.fetchall()]
         cur.close()
+
+    # Agrupar items por legajo en memoria
+    items_by_legajo: Dict[str, List[Dict]] = {e["legajo"]: [] for e in empleados}
+    for it in items_all:
+        leg = str(it["legajo"])
+        if leg in items_by_legajo:
+            items_by_legajo[leg].append(it)
 
     result = []
     for emp in empleados:
-        items = list_items(emp["legajo"], periodo)
+        items = items_by_legajo.get(emp["legajo"], [])
 
         by_date: Dict[str, Dict] = {}
         for it in items:
-            f = it["fecha"]
+            f = str(it["fecha"])
             if f not in by_date:
                 by_date[f] = {"fecha": f, "tipos": [], "HV": 0.0, "HE": 0.0, "comentario": ""}
             t = it["tipo"]

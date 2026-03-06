@@ -241,7 +241,17 @@ async def downtimes_data(
 
     df = df.head(limit)
 
+    # Reemplazar todos los NaN/inf por None antes de serializar
+    df = df.where(pd.notna(df), other=None)
+    records = df.to_dict(orient="records")
+    # Segunda pasada: limpiar cualquier float nan que haya quedado
+    import math
+    clean = [
+        {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row.items()}
+        for row in records
+    ]
+
     return JSONResponse(content={
-        "total": len(df),
-        "data":  df.where(pd.notna(df), None).to_dict(orient="records"),
+        "total": len(clean),
+        "data":  clean,
     })

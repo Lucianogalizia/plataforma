@@ -254,7 +254,7 @@ async def downtimes_data(
 
         return JSONResponse(content={
             "total": len(df),
-            "data":  df.where(pd.notna(df), None).to_dict(orient="records"),
+            "data":  df.where(pd.notna(df), None).replace({float('nan'): None}).to_dict(orient="records"),
         })
 
     except HTTPException:

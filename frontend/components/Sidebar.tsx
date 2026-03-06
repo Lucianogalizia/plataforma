@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Wrench,
   Users,
+  BarChart2,
 } from "lucide-react";
 
 const NAV = [
@@ -41,6 +42,11 @@ const NAV = [
     label: "MERMA",
     href: "/merma",
     icon: TrendingUp,
+  },
+  {
+    label: "Histórico de Pérdidas",
+    href: "/historico-perdidas",
+    icon: BarChart2,
   },
   {
     label: "Alertas Llenado BM",

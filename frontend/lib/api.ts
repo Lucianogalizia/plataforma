@@ -312,6 +312,41 @@ export interface FilaValidacion {
   lon?: number | null;
   Dias_desde_ultima?: number | null;
 }
+
+// ==========================================================
+// TIPOS — HISTÓRICO DE PÉRDIDAS (NUEVO)
+// ==========================================================
+
+export interface DowntimeRow {
+  "FECHA DESDE"?:           string | null;
+  "FECHA HASTA"?:           string | null;
+  oilShortfall?:            number | null;
+  waterShortfall?:          number | null;
+  liquidShortfall?:         number | null;
+  gasShortfall?:            number | null;
+  waterInjection?:          number | null;
+  potentialOil?:            number | null;
+  sumpInjection?:           number | null;
+  potentialWater?:          number | null;
+  potentialLiquid?:         number | null;
+  potentialGas?:            number | null;
+  potentialWaterInjection?: number | null;
+  POZO?:                    string | null;
+  RUBRO?:                   string | null;
+}
+
+export interface DowntimeInfo {
+  exists:      boolean;
+  updated_at?: string | null;
+  file?:       string;
+  size_kb?:    number;
+  rows?:       number;
+  columns?:    string[];
+  fecha_min?:  string | null;
+  fecha_max?:  string | null;
+  error?:      string;
+}
+
 // ==========================================================
 // DIN
 // ==========================================================
@@ -455,7 +490,6 @@ export const api = {
   },
 
   // ==========================================================
-  // ==========================================================
   // VALIDACIONES
   // ==========================================================
   getValidaciones: (pozo: string) =>
@@ -550,6 +584,29 @@ export const api = {
     }>("/api/merma/info", 30 * 1000),
 
   // ==========================================================
+  // HISTÓRICO DE PÉRDIDAS (NUEVO)
+  // ==========================================================
+  getDowntimesInfo: () =>
+    apiGetCached<DowntimeInfo>("/api/merma/downtimes/info", 30 * 1000),
+
+  getDowntimes: (params?: {
+    pozo?:        string;
+    fecha_desde?: string;
+    fecha_hasta?: string;
+    limit?:       number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.pozo)        qs.set("pozo",        params.pozo);
+    if (params?.fecha_desde) qs.set("fecha_desde", params.fecha_desde);
+    if (params?.fecha_hasta) qs.set("fecha_hasta", params.fecha_hasta);
+    if (params?.limit)       qs.set("limit",       String(params.limit));
+    return apiGetCached<{ total: number; data: DowntimeRow[] }>(
+      `/api/merma/downtimes?${qs}`,
+      5 * 60 * 1000
+    );
+  },
+
+  // ==========================================================
   // ALERTAS LLENADO DE BOMBA BM
   // ==========================================================
   getAlertasLlenadoInfo: () =>
@@ -581,24 +638,19 @@ export const api = {
 
   // ==========================================================
   // RRHH — Guardias
-  // TTLs alineados con el backend para que frontend y backend
-  // expiren al mismo tiempo y no haya datos rancios.
   // ==========================================================
 
-  // Auth
   rrhhLogin: (legajo: string, cuil: string) =>
     apiFetch<{ ok: boolean; user: RRHHUser }>("/api/rrhh/login", {
       method: "POST",
       body: JSON.stringify({ legajo, cuil }),
     }),
 
-  // Períodos (1 hora — estático dentro del día)
   rrhhPeriodos: (n = 8) =>
     apiGetCached<{ actual: string; periodos: RRHHPeriodo[] }>(
       `/api/rrhh/periodos?n=${n}`, 60 * 60 * 1000
     ),
 
-  // Personal (30 min)
   rrhhPersonal: () =>
     apiGetCached<{ personal: RRHHPersona[] }>("/api/rrhh/personal", 30 * 60 * 1000),
 
@@ -608,13 +660,11 @@ export const api = {
       { method: "POST", body: JSON.stringify({ rows }) }
     ).then(r => { clearApiCache("/api/rrhh/personal"); return r; }),
 
-  // Parte — leer (5 min)
   rrhhGetParte: (legajo: string, periodo: string) =>
     apiGetCached<RRHHParte>(
       `/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}`, 5 * 60 * 1000
     ),
 
-  // Parte — guardar borrador (invalida parte + bitácora)
   rrhhGuardarParte: (legajo: string, periodo: string, items: RRHHItem[]) =>
     apiFetch<{ ok: boolean; estado: string; parte: RRHHParte }>(
       `/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}/guardar`,
@@ -625,7 +675,6 @@ export const api = {
       return r;
     }),
 
-  // Parte — enviar a aprobación
   rrhhEnviarParte: (legajo: string, periodo: string, items: RRHHItem[]) =>
     apiFetch<{ ok: boolean; estado: string; parte: RRHHParte }>(
       `/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}/enviar`,
@@ -633,11 +682,10 @@ export const api = {
     ).then(r => {
       clearApiCache(`/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}`);
       clearApiCache(`/api/rrhh/bitacora/${encodeURIComponent(legajo)}`);
-      clearApiCache("/api/rrhh/equipo");  // invalida pendientes del líder
+      clearApiCache("/api/rrhh/equipo");
       return r;
     }),
 
-  // Parte líder — guardar propio (auto-aprobado)
   rrhhGuardarParteLider: (legajo: string, periodo: string, items: RRHHItem[]) =>
     apiFetch<{ ok: boolean; estado: string; parte: RRHHParte }>(
       `/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}/guardar-lider`,
@@ -649,7 +697,6 @@ export const api = {
       return r;
     }),
 
-  // Aprobar (líder)
   rrhhAprobar: (legajo: string, periodo: string, aprobadorLegajo: string) =>
     apiFetch<{ ok: boolean; estado: string }>(
       `/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}/aprobar`,
@@ -662,7 +709,6 @@ export const api = {
       return r;
     }),
 
-  // Rechazar (líder)
   rrhhRechazar: (legajo: string, periodo: string, aprobadorLegajo: string, comentario: string) =>
     apiFetch<{ ok: boolean; estado: string }>(
       `/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}/rechazar`,
@@ -674,19 +720,16 @@ export const api = {
       return r;
     }),
 
-  // Bitácora (5 min)
   rrhhBitacora: (legajo: string) =>
     apiGetCached<{ legajo: string; partes: RRHHBitacoraItem[] }>(
       `/api/rrhh/bitacora/${encodeURIComponent(legajo)}`, 5 * 60 * 1000
     ),
 
-  // Pendientes del líder (2 min — necesita ver novedades rápido)
   rrhhPendientes: (leaderLegajo: string) =>
     apiGetCached<{ leader_legajo: string; pendientes: RRHHPendiente[] }>(
       `/api/rrhh/equipo/${encodeURIComponent(leaderLegajo)}/pendientes`, 2 * 60 * 1000
     ),
 
-  // Consolidado (5 min)
   rrhhConsolidado: (leaderLegajo: string, periodo: string) =>
     apiGetCached<RRHHConsolidado>(
       `/api/rrhh/consolidado/${encodeURIComponent(leaderLegajo)}/${periodo}`, 5 * 60 * 1000

@@ -64,8 +64,9 @@ export default function HistoricoPérdidasPage() {
 
   useEffect(() => { cargarDatos(); }, [cargarDatos]);
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     clearApiCache("/api/merma/downtimes");
+    try { await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/merma/downtimes/refresh`, { method: "POST" }); } catch {}
     cargarDatos();
   };
 

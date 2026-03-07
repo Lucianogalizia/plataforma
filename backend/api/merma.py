@@ -157,6 +157,19 @@ async def merma_dashboard():
 
 
 # ==========================================================
+# POST /api/merma/downtimes/refresh
+# ==========================================================
+
+@router.post("/downtimes/refresh")
+async def downtimes_refresh():
+    """Limpia el caché en memoria para forzar recarga del CSV desde GCS."""
+    _downtimes_cache["df"]        = None
+    _downtimes_cache["updated_at"]= None
+    _downtimes_cache["loaded_at"] = 0.0
+    return JSONResponse(content={"ok": True, "message": "Caché limpiado. Próxima consulta recarga desde GCS."})
+
+
+# ==========================================================
 # GET /api/merma/downtimes/info
 # ==========================================================
 

@@ -294,7 +294,7 @@ def main():
         sys.exit(1)
 
     HOY = date.today()
-    FIN = HOY - timedelta(days=1)  # hasta ayer
+    FIN = HOY  # hasta hoy inclusive
 
     # Leer histórico existente desde GCS
     df_prev    = read_csv_from_gcs()

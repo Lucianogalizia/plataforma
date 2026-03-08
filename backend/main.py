@@ -54,6 +54,7 @@ from api.acciones     import router as acciones_router
 from api.merma           import router as merma_router
 from api.rrhh            import router as rrhh_router
 from api.alertas_llenado import router as alertas_llenado_router
+from api.controles       import router as controles_router
 
 
 # ==========================================================
@@ -371,6 +372,13 @@ app.include_router(
     prefix = "/api/alertas-llenado",
     tags   = ["Alertas Llenado de Bomba BM"],
 )
+
+app.include_router(
+    controles_router,
+    prefix = "/api/controles",
+    tags   = ["Controles — Histórico de controles de producción"],
+)
+
 
 app.include_router(
     rrhh_router,

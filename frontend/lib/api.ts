@@ -618,6 +618,51 @@ export const api = {
       error?: string;
     }>("/api/alertas-llenado/info", 30 * 1000),
 
+
+  // ==========================================================
+  // CONTROLES HISTÓRICOS
+  // ==========================================================
+  getControlesInfo: () =>
+    apiGetCached<ControlesInfo>("/api/controles/info", 30 * 1000),
+
+  getControlesHistorico: (params?: {
+    pozo?:        string;
+    bateria?:     string;
+    estado_pozo?: string;
+    fecha_desde?: string;
+    fecha_hasta?: string;
+    limit?:       number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.pozo)        qs.set("pozo",        params.pozo);
+    if (params?.bateria)     qs.set("bateria",     params.bateria);
+    if (params?.estado_pozo) qs.set("estado_pozo", params.estado_pozo);
+    if (params?.fecha_desde) qs.set("fecha_desde", params.fecha_desde);
+    if (params?.fecha_hasta) qs.set("fecha_hasta", params.fecha_hasta);
+    if (params?.limit)       qs.set("limit",       String(params.limit));
+    return apiGetCached<{ total: number; data: ControlRow[] }>(
+      `/api/controles/historico?${qs}`,
+      5 * 60 * 1000
+    );
+  },
+
+  getControlesMerma: (params?: {
+    solo_merma?:  boolean;
+    bateria?:     string;
+    estado_pozo?: string;
+    limit?:       number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.solo_merma)  qs.set("solo_merma",  String(params.solo_merma));
+    if (params?.bateria)     qs.set("bateria",     params.bateria);
+    if (params?.estado_pozo) qs.set("estado_pozo", params.estado_pozo);
+    if (params?.limit)       qs.set("limit",       String(params.limit));
+    return apiGetCached<{ total: number; data: MermaRow[] }>(
+      `/api/controles/merma?${qs}`,
+      5 * 60 * 1000
+    );
+  },
+
   // ==========================================================
   // SISTEMA
   // ==========================================================
@@ -755,6 +800,54 @@ export interface RRHHPeriodo {
   display: string;
   start:   string;
   end:     string;
+}
+
+
+// ==========================================================
+// CONTROLES HISTÓRICOS
+// ==========================================================
+
+export interface ControlesInfo {
+  exists:     boolean;
+  updated_at: string | null;
+  rows?:      number;
+  pozos?:     number;
+  en_merma?:  number;
+  fecha_min?: string | null;
+  fecha_max?: string | null;
+  error?:     string;
+}
+
+export interface ControlRow {
+  Pozo?:                     string;
+  "Día Operativo"?:          string;
+  "Fecha y Hora"?:           string;
+  Estado?:                   string;
+  "Producción de Gas"?:      number | null;
+  "Producción de Líquido"?:  number | null;
+  "Producción de Petróleo"?: number | null;
+  BATERIA?:                  string | null;
+  ESTADO_POZO?:              string | null;
+  TIPO_PRODUCCION?:          string | null;
+  SIST_EXTRACCION?:          string | null;
+}
+
+export interface MermaRow {
+  POZO?:                string;
+  BATERIA?:             string | null;
+  ESTADO_POZO?:         string | null;
+  TIPO_PRODUCCION?:     string | null;
+  SIST_EXTRACCION?:     string | null;
+  FECHA_ULTIMO_CONTROL?: string | null;
+  DIAS_SIN_CONTROL?:    number | null;
+  NETA_ULTIMO_M3?:      number | null;
+  NETA_PENULTIMO_M3?:   number | null;
+  PCT_MERMA_NETA?:      number | null;
+  BRUTA_ULTIMO_M3?:     number | null;
+  BRUTA_PENULTIMO_M3?:  number | null;
+  PCT_MERMA_BRUTA?:     number | null;
+  EN_MERMA_NETA?:       boolean | null;
+  EN_MERMA_BRUTA?:      boolean | null;
 }
 
 export interface RRHHPersona {

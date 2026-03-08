@@ -54,6 +54,11 @@ const NAV = [
     icon: Activity,
   },
   {
+    label: "Controles Históricos",
+    href: "/controles-historicos",
+    icon: BarChart2,
+  },
+  {
     label: "RRHH",
     href: "/rrhh",
     icon: Users,

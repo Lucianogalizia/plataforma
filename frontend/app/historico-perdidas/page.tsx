@@ -1,8 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import api, { clearApiCache } from "@/lib/api";
-import type { DowntimeRow, DowntimeInfo } from "@/lib/api";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import {
+  loadDowntimes,
+  getDowntimesSnapshot,
+  subscribeDowntimes,
+  invalidateDowntimes,
+} from "@/lib/datastore";
+import type { DowntimeRow } from "@/lib/api";
 
 type SortKey = keyof DowntimeRow;
 type SortDir = "asc" | "desc";
@@ -10,77 +15,77 @@ type SortDir = "asc" | "desc";
 const DEFAULT_WIDTHS = [130, 210, 110, 110, 100, 95, 95, 85, 100, 100];
 
 const COLS: { key: SortKey; label: string; num?: boolean; highlight?: boolean }[] = [
-  { key: "POZO",           label: "Pozo" },
-  { key: "RUBRO",          label: "Rubro" },
-  { key: "FECHA DESDE",    label: "Desde" },
-  { key: "FECHA HASTA",    label: "Hasta" },
-  { key: "oilShortfall",   label: "Petróleo (m³)", num: true, highlight: true },
-  { key: "waterShortfall", label: "Agua (m³)",     num: true },
-  { key: "liquidShortfall",label: "Líquido (m³)",  num: true },
-  { key: "gasShortfall",   label: "Gas (m³)",      num: true },
-  { key: "potentialOil",   label: "Pot. Petróleo", num: true },
-  { key: "potentialLiquid",label: "Pot. Líquido",  num: true },
+  { key: "POZO",            label: "Pozo" },
+  { key: "RUBRO",           label: "Rubro" },
+  { key: "FECHA DESDE",     label: "Desde" },
+  { key: "FECHA HASTA",     label: "Hasta" },
+  { key: "oilShortfall",    label: "Petróleo (m³)", num: true, highlight: true },
+  { key: "waterShortfall",  label: "Agua (m³)",     num: true },
+  { key: "liquidShortfall", label: "Líquido (m³)",  num: true },
+  { key: "gasShortfall",    label: "Gas (m³)",      num: true },
+  { key: "potentialOil",    label: "Pot. Petróleo", num: true },
+  { key: "potentialLiquid", label: "Pot. Líquido",  num: true },
 ];
 
+function KpiCard({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="bg-[#1e293b] rounded-lg px-4 py-2 border border-[#334155]">
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className={`text-base font-bold mt-0.5 ${highlight ? "text-sky-400" : "text-slate-200"}`}>{value}</p>
+    </div>
+  );
+}
+
 export default function HistoricoPérdidasPage() {
-  const [info, setInfo]       = useState<DowntimeInfo | null>(null);
-  const [rows, setRows]       = useState<DowntimeRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState<string | null>(null);
+  const [snap, setSnap] = useState(getDowntimesSnapshot);
+
+  useEffect(() => {
+    const unsub = subscribeDowntimes(() => setSnap(getDowntimesSnapshot()));
+    loadDowntimes();
+    return unsub;
+  }, []);
+
+  const loading = snap.status === "loading" || snap.status === "idle";
+  const error   = snap.error;
+  const info    = snap.data?.info ?? null;
+  const allRows = snap.data?.rows ?? [];
 
   const [filtroPOZO,  setFiltroPOZO]  = useState("");
   const [filtroRUBRO, setFiltroRUBRO] = useState("");
   const [fechaDesde,  setFechaDesde]  = useState("");
   const [fechaHasta,  setFechaHasta]  = useState("");
-
   const [sortKey, setSortKey] = useState<SortKey>("FECHA DESDE");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  // Ancho de columnas redimensionables
-  const [colWidths, setColWidths] = useState<number[]>(DEFAULT_WIDTHS);
-  const resizingRef = useRef<{ colIdx: number; startX: number; startW: number } | null>(null);
+  const pozosUnicos  = useMemo(() =>
+    Array.from(new Set(allRows.map(r => r.POZO).filter(Boolean))).sort() as string[], [allRows]);
+  const rubrosUnicos = useMemo(() =>
+    Array.from(new Set(allRows.map(r => r.RUBRO).filter(Boolean))).sort() as string[], [allRows]);
 
-  // ── Carga de datos ──────────────────────────────────────
-  const cargarDatos = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [infoData, rowsData] = await Promise.all([
-        api.getDowntimesInfo(),
-        api.getDowntimes({
-          pozo:        filtroPOZO   || undefined,
-          fecha_desde: fechaDesde   || undefined,
-          fecha_hasta: fechaHasta   || undefined,
-          limit:       5000,
-        }),
-      ]);
-      setInfo(infoData);
-      setRows(rowsData.data);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Error cargando datos");
-    }
-    setLoading(false);
-  }, [filtroPOZO, fechaDesde, fechaHasta]);
+  const rowsOrdenados = useMemo(() => {
+    let rows = allRows;
+    if (filtroPOZO)  rows = rows.filter(r => r.POZO === filtroPOZO);
+    if (filtroRUBRO) rows = rows.filter(r => r.RUBRO === filtroRUBRO);
+    if (fechaDesde)  rows = rows.filter(r => r["FECHA DESDE"] && r["FECHA DESDE"] >= fechaDesde);
+    if (fechaHasta)  rows = rows.filter(r => r["FECHA DESDE"] && r["FECHA DESDE"] <= fechaHasta + "T23:59:59");
+    return [...rows].sort((a, b) => {
+      const va = a[sortKey] ?? "", vb = b[sortKey] ?? "";
+      if (va < vb) return sortDir === "asc" ? -1 : 1;
+      if (va > vb) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [allRows, filtroPOZO, filtroRUBRO, fechaDesde, fechaHasta, sortKey, sortDir]);
 
-  useEffect(() => { cargarDatos(); }, [cargarDatos]);
-
-  const handleRefresh = async () => {
-    clearApiCache("/api/merma/downtimes");
-    try { await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/merma/downtimes/refresh`, { method: "POST" }); } catch {}
-    cargarDatos();
-  };
-
-  // ── Ordenamiento ────────────────────────────────────────
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortKey(key); setSortDir("asc"); }
   };
 
-  // ── Resize de columnas ──────────────────────────────────
+  const [colWidths, setColWidths] = useState<number[]>(DEFAULT_WIDTHS);
+  const resizingRef = useRef<{ colIdx: number; startX: number; startW: number } | null>(null);
   const startResize = (e: React.MouseEvent, colIdx: number) => {
     e.preventDefault();
     resizingRef.current = { colIdx, startX: e.clientX, startW: colWidths[colIdx] };
-
     const onMove = (ev: MouseEvent) => {
       if (!resizingRef.current) return;
       const { colIdx: ci, startX, startW } = resizingRef.current;
@@ -96,47 +101,26 @@ export default function HistoricoPérdidasPage() {
     window.addEventListener("mouseup", onUp);
   };
 
-  // ── Exportar a CSV ────────────────────────────────────
+  const handleRefresh = useCallback(() => {
+    invalidateDowntimes();
+    loadDowntimes(true);
+  }, []);
+
   const exportarCSV = () => {
     const headers = ["Pozo","Rubro","Fecha Desde","Fecha Hasta","Petróleo (m³)","Agua (m³)","Líquido (m³)","Gas (m³)","Pot. Petróleo","Pot. Líquido"];
     const filas = rowsOrdenados.map(r => [
-      r.POZO ?? "",
-      r.RUBRO ?? "",
-      r["FECHA DESDE"] ?? "",
-      r["FECHA HASTA"] ?? "",
-      r.oilShortfall ?? "",
-      r.waterShortfall ?? "",
-      r.liquidShortfall ?? "",
-      r.gasShortfall ?? "",
-      r.potentialOil ?? "",
-      r.potentialLiquid ?? "",
+      r.POZO ?? "", r.RUBRO ?? "", r["FECHA DESDE"] ?? "", r["FECHA HASTA"] ?? "",
+      r.oilShortfall ?? "", r.waterShortfall ?? "", r.liquidShortfall ?? "",
+      r.gasShortfall ?? "", r.potentialOil ?? "", r.potentialLiquid ?? "",
     ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
-
-    const csv = [headers.join(","), ...filas].join("\n");
+    const csv  = [headers.join(","), ...filas].join("\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const url  = URL.createObjectURL(blob);
     const a    = document.createElement("a");
-    a.href     = url;
+    a.href     = URL.createObjectURL(blob);
     a.download = `historico_perdidas_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
-    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(a.href);
   };
-
-  // ── Filtros y ordenamiento ──────────────────────────────
-  const rowsFiltrados = filtroRUBRO
-    ? rows.filter(r => r.RUBRO?.toLowerCase().includes(filtroRUBRO.toLowerCase()))
-    : rows;
-
-  const rowsOrdenados = [...rowsFiltrados].sort((a, b) => {
-    const va = a[sortKey] ?? "";
-    const vb = b[sortKey] ?? "";
-    if (va < vb) return sortDir === "asc" ? -1 : 1;
-    if (va > vb) return sortDir === "asc" ? 1 : -1;
-    return 0;
-  });
-
-  const pozosUnicos  = Array.from(new Set(rows.map(r => r.POZO).filter((v): v is string => Boolean(v)))).sort();
-  const rubrosUnicos = Array.from(new Set(rows.map(r => r.RUBRO).filter((v): v is string => Boolean(v)))).sort();
 
   const fmtDate = (v?: string | null) => v ? v.slice(0, 16).replace("T", " ") : "—";
   const fmtNum  = (v?: number | null) =>
@@ -144,8 +128,6 @@ export default function HistoricoPérdidasPage() {
 
   return (
     <div className="flex flex-col h-full bg-[#0f172a]">
-
-      {/* ── Header ── */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-[#334155]">
         <div>
           <h1 className="text-xl font-bold text-slate-100">Histórico de Pérdidas</h1>
@@ -153,37 +135,30 @@ export default function HistoricoPérdidasPage() {
             <p className="text-xs text-slate-400 mt-1">
               Actualizado: {info.updated_at ? new Date(info.updated_at).toLocaleString("es-AR") : "—"}
               {info.rows != null ? ` · ${info.rows.toLocaleString()} registros` : ""}
-              {info.fecha_min && info.fecha_max
-                ? ` · ${info.fecha_min.slice(0, 10)} → ${info.fecha_max.slice(0, 10)}`
-                : ""}
+              {info.fecha_min && info.fecha_max ? ` · ${info.fecha_min.slice(0, 10)} → ${info.fecha_max.slice(0, 10)}` : ""}
             </p>
           )}
         </div>
         <div className="flex gap-2">
-          {/* Exportar Excel */}
-          {rows.length > 0 && (
+          {rowsOrdenados.length > 0 && (
             <button onClick={exportarCSV}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white transition-colors">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               Exportar CSV
             </button>
           )}
-          {/* Actualizar */}
           <button onClick={handleRefresh} disabled={loading}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 transition-colors">
             <svg className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
             Actualizar
           </button>
         </div>
       </div>
 
-      {/* ── Filtros ── */}
       <div className="flex flex-wrap gap-3 px-6 py-3 border-b border-[#334155] bg-[#1e293b]">
         <div className="flex flex-col gap-1">
           <label className="text-xs text-slate-400">Pozo</label>
@@ -219,9 +194,16 @@ export default function HistoricoPérdidasPage() {
             </button>
           </div>
         )}
+        {snap.status === "ready" && (
+          <div className="flex flex-col justify-end ml-auto">
+            <span className="text-xs text-emerald-500 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+              {allRows.length.toLocaleString()} registros en memoria
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* ── KPIs ── */}
       {!loading && rowsOrdenados.length > 0 && (
         <div className="flex gap-3 px-6 py-3 border-b border-[#334155]">
           <KpiCard label="Eventos" value={rowsOrdenados.length.toLocaleString()} />
@@ -235,13 +217,13 @@ export default function HistoricoPérdidasPage() {
         </div>
       )}
 
-      {/* ── Tabla ── */}
       <div className="flex-1 overflow-auto px-4 py-3">
         {loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="text-center">
               <div className="w-8 h-8 border-2 border-sky-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
               <p className="text-slate-400 text-sm">Cargando histórico...</p>
+              <p className="text-slate-500 text-xs mt-1">Solo la primera vez</p>
             </div>
           </div>
         ) : error ? (
@@ -261,25 +243,16 @@ export default function HistoricoPérdidasPage() {
                     <th key={String(col.key)}
                       style={{ width: colWidths[i], minWidth: colWidths[i], position: "relative" }}
                       className="border-b border-[#334155] px-0 py-0 select-none">
-                      {/* Contenido del header */}
-                      <div
-                        onClick={() => handleSort(col.key)}
-                        className={`flex items-center gap-1 px-2 py-2 cursor-pointer hover:bg-[#263348] text-xs font-semibold text-slate-400 uppercase tracking-wide ${col.num ? "justify-end" : ""}`}
-                      >
+                      <div onClick={() => handleSort(col.key)}
+                        className={`flex items-center gap-1 px-2 py-2 cursor-pointer hover:bg-[#263348] text-xs font-semibold text-slate-400 uppercase tracking-wide ${col.num ? "justify-end" : ""}`}>
                         <span className="truncate">{col.label}</span>
                         {sortKey === col.key && (
                           <span className="text-sky-400 flex-shrink-0">{sortDir === "asc" ? "↑" : "↓"}</span>
                         )}
                       </div>
-                      {/* Handle de resize */}
-                      <div
-                        onMouseDown={e => startResize(e, i)}
-                        style={{
-                          position: "absolute", right: 0, top: 0, bottom: 0,
-                          width: 5, cursor: "col-resize", zIndex: 20,
-                        }}
-                        className="hover:bg-sky-500 opacity-0 hover:opacity-100 transition-opacity"
-                      />
+                      <div onMouseDown={e => startResize(e, i)}
+                        style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 5, cursor: "col-resize", zIndex: 20 }}
+                        className="hover:bg-sky-500 opacity-0 hover:opacity-100 transition-opacity" />
                     </th>
                   ))}
                 </tr>
@@ -304,15 +277,6 @@ export default function HistoricoPérdidasPage() {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function KpiCard({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
-  return (
-    <div className="bg-[#1e293b] rounded-lg px-4 py-2 border border-[#334155]">
-      <p className="text-xs text-slate-500">{label}</p>
-      <p className={`text-base font-bold mt-0.5 ${highlight ? "text-sky-400" : "text-slate-200"}`}>{value}</p>
     </div>
   );
 }

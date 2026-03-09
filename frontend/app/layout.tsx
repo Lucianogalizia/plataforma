@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import ChatAssistant from "@/components/ChatAssistant";
 
 export const metadata: Metadata = {
   title: "Plataforma DINA",
@@ -13,7 +14,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es">
-      <body>{children}</body>
+      <body>
+        {children}
+        <ChatAssistant />
+      </body>
     </html>
   );
 }

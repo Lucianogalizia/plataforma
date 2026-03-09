@@ -477,7 +477,7 @@ export default function ControlesHistoricosPage() {
               <p className="text-slate-500 text-sm">No hay datos de merma disponibles.</p>
             </div>
           ) : (
-            <div className="rounded-lg border border-[#334155] overflow-hidden">
+            <div className="rounded-lg border border-[#334155] overflow-visible">
               <DualScrollTable totalWidth={colWidthsM.reduce((a, b) => a + b, 0)}>
               <table className="text-left" style={{ borderCollapse: "collapse", width: colWidthsM.reduce((a, b) => a + b, 0) }}>
                 <thead className="bg-[#1e293b] sticky top-0 z-10">

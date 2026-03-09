@@ -6,7 +6,7 @@
 // Los filtros se aplican 100% en el cliente (sin llamadas al backend).
 // ==========================================================
 
-import api from "./api";
+import api, { clearApiCache } from "./api";
 import type { DowntimeRow, DowntimeInfo, ControlRow, MermaRow, ControlesInfo } from "./api";
 
 // ── Tipos internos ──────────────────────────────────────────
@@ -86,6 +86,7 @@ export function subscribeDowntimes(fn: () => void) {
 export function invalidateDowntimes() {
   dtStatus = "idle";
   dtData   = null;
+  clearApiCache("/api/merma/downtimes");
 }
 
 // ── Carga de Controles ─────────────────────────────────────
@@ -131,4 +132,5 @@ export function subscribeControles(fn: () => void) {
 export function invalidateControles() {
   ctStatus = "idle";
   ctData   = null;
+  clearApiCache("/api/controles");
 }

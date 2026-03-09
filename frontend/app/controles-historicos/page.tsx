@@ -4,6 +4,108 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import api from "@/lib/api";
 import type { ControlesInfo, ControlRow, MermaRow } from "@/lib/api";
 
+// ── Searchable Pozo Picker ────────────────────────────────
+function PozoPicker({ value, onChange, pozos }: { value: string; onChange: (v: string) => void; pozos: string[] }) {
+  const [query,    setQuery]    = useState(value);
+  const [open,     setOpen]     = useState(false);
+  const [focused,  setFocused]  = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { if (!focused) setQuery(value); }, [value, focused]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false); setFocused(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = query.trim() === ""
+    ? pozos
+    : pozos.filter(p => p.toLowerCase().includes(query.toLowerCase()));
+
+  const select = (p: string) => {
+    onChange(p); setQuery(p); setOpen(false); setFocused(false);
+  };
+  const clear = () => {
+    onChange(""); setQuery(""); setOpen(false);
+  };
+
+  return (
+    <div ref={ref} className="relative w-52">
+      <div className="flex items-center bg-[#0f172a] border border-[#334155] rounded-lg overflow-hidden">
+        <input
+          value={query}
+          onChange={e => { setQuery(e.target.value); setOpen(true); onChange(""); }}
+          onFocus={() => { setFocused(true); setOpen(true); }}
+          placeholder="Buscar pozo..."
+          className="bg-transparent text-slate-200 text-xs px-3 py-1.5 w-full outline-none"
+        />
+        {query && (
+          <button onClick={clear} className="px-2 text-slate-500 hover:text-slate-300 text-xs">✕</button>
+        )}
+      </div>
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 mt-1 w-full max-h-60 overflow-y-auto bg-[#1e293b] border border-[#334155] rounded-lg shadow-xl">
+          {filtered.map(p => (
+            <div key={p} onMouseDown={() => select(p)}
+              className={`px-3 py-1.5 text-xs cursor-pointer font-mono truncate transition-colors
+                ${p === value ? "bg-sky-700 text-white" : "text-slate-200 hover:bg-[#263348]"}`}>
+              {p}
+            </div>
+          ))}
+        </div>
+      )}
+      {open && filtered.length === 0 && query && (
+        <div className="absolute z-50 mt-1 w-full bg-[#1e293b] border border-[#334155] rounded-lg shadow-xl px-3 py-2 text-xs text-slate-500">
+          Sin resultados
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Dual scrollbar wrapper (scroll arriba y abajo) ────────
+function DualScrollTable({ children, totalWidth }: { children: React.ReactNode; totalWidth: number }) {
+  const topScrollRef   = useRef<HTMLDivElement>(null);
+  const tableWrapRef   = useRef<HTMLDivElement>(null);
+  const syncingTop     = useRef(false);
+  const syncingBottom  = useRef(false);
+
+  const onTopScroll = () => {
+    if (syncingBottom.current) return;
+    syncingTop.current = true;
+    if (tableWrapRef.current && topScrollRef.current)
+      tableWrapRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+    syncingTop.current = false;
+  };
+  const onBottomScroll = () => {
+    if (syncingTop.current) return;
+    syncingBottom.current = true;
+    if (topScrollRef.current && tableWrapRef.current)
+      topScrollRef.current.scrollLeft = tableWrapRef.current.scrollLeft;
+    syncingBottom.current = false;
+  };
+
+  return (
+    <div>
+      {/* Barra de scroll superior */}
+      <div ref={topScrollRef} onScroll={onTopScroll}
+        className="overflow-x-auto border-b border-[#334155]"
+        style={{ height: 12 }}>
+        <div style={{ width: totalWidth, height: 1 }} />
+      </div>
+      {/* Tabla con scroll inferior */}
+      <div ref={tableWrapRef} onScroll={onBottomScroll} className="overflow-x-auto">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 type Vista = "controles" | "merma";
 
 // ── Helpers ───────────────────────────────────────────────
@@ -45,6 +147,7 @@ export default function ControlesHistoricosPage() {
   const [merma,     setMerma]     = useState<MermaRow[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState<string | null>(null);
+  const [allPozos,  setAllPozos]  = useState<string[]>([]);
 
   // Filtros
   const [filtroPOZO,    setFiltroPOZO]    = useState("");
@@ -80,6 +183,14 @@ export default function ControlesHistoricosPage() {
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   };
+
+  // Carga inicial de pozos sin filtro (para el picker)
+  useEffect(() => {
+    api.getControlesHistorico({ limit: 10000 }).then(res => {
+      const lista = Array.from(new Set(res.data.map(r => r.Pozo).filter(Boolean))).sort() as string[];
+      setAllPozos(lista);
+    }).catch(() => {});
+  }, []);
 
   // ── Carga de datos ─────────────────────────────────────
   const cargarDatos = useCallback(async () => {
@@ -138,6 +249,7 @@ export default function ControlesHistoricosPage() {
   });
 
   // ── Valores únicos para filtros ───────────────────────
+  const pozos    = allPozos;
   const baterias = Array.from(new Set(controles.map(r => r.BATERIA).filter(Boolean))).sort() as string[];
   const estados  = Array.from(new Set(controles.map(r => r.ESTADO_POZO).filter(Boolean))).sort() as string[];
 
@@ -229,8 +341,7 @@ export default function ControlesHistoricosPage() {
       <div className="flex flex-wrap gap-3 px-6 py-3 border-b border-[#334155] bg-[#1e293b]">
         <div className="flex flex-col gap-1">
           <label className="text-xs text-slate-400">Pozo</label>
-          <input value={filtroPOZO} onChange={e => setFiltroPOZO(e.target.value)} placeholder="Buscar pozo..."
-            className="bg-[#0f172a] border border-[#334155] text-slate-200 text-xs rounded-lg px-3 py-1.5 w-44" />
+          <PozoPicker value={filtroPOZO} onChange={setFiltroPOZO} pozos={pozos} />
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs text-slate-400">Batería</label>
@@ -367,6 +478,7 @@ export default function ControlesHistoricosPage() {
             </div>
           ) : (
             <div className="rounded-lg border border-[#334155] overflow-hidden">
+              <DualScrollTable totalWidth={colWidthsM.reduce((a, b) => a + b, 0)}>
               <table className="text-left" style={{ borderCollapse: "collapse", width: colWidthsM.reduce((a, b) => a + b, 0) }}>
                 <thead className="bg-[#1e293b] sticky top-0 z-10">
                   <tr>
@@ -405,6 +517,7 @@ export default function ControlesHistoricosPage() {
                   ))}
                 </tbody>
               </table>
+              </DualScrollTable>
             </div>
           )
         )}

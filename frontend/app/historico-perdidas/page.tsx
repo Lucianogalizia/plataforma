@@ -42,7 +42,7 @@ export default function HistoricoPérdidasPage() {
   useEffect(() => {
     const unsub = subscribeDowntimes(() => setSnap(getDowntimesSnapshot()));
     loadDowntimes();
-    return unsub;
+    return () => { unsub(); };
   }, []);
 
   const loading = snap.status === "loading" || snap.status === "idle";

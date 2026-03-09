@@ -34,9 +34,6 @@ SUPER_LIDERES = {"5473", "5474", "5477", "5478", "5508"}
 TIPOS_NUM = ["HV", "HE"]
 TIPOS_ALL = TIPOS_DIA + TIPOS_NUM
 
-# Líderes con visibilidad total (ven todos los empleados sin filtro de equipo)
-SUPER_LEADERS = {"5474", "5476", "5477", "5478", "5508"}
-
 MESES_ES = [
     "Enero","Febrero","Marzo","Abril","Mayo","Junio",
     "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre",

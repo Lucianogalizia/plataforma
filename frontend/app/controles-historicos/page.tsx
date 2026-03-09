@@ -124,7 +124,7 @@ export default function ControlesHistoricosPage() {
   useEffect(() => {
     const unsub = subscribeControles(() => setSnap(getControlesSnapshot()));
     loadControles();
-    return unsub;
+    return () => { unsub(); };
   }, []);
 
   const loading     = snap.status === "loading" || snap.status === "idle";

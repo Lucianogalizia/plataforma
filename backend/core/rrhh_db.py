@@ -28,8 +28,14 @@ import psycopg2.pool
 
 ISO_DT    = "%Y-%m-%d %H:%M:%S"
 TIPOS_DIA = ["G", "F", "D", "HO"]
+
+# Líderes principales: ven y aprueban TODO el personal
+SUPER_LIDERES = {"5473", "5474", "5477", "5478", "5508"}
 TIPOS_NUM = ["HV", "HE"]
 TIPOS_ALL = TIPOS_DIA + TIPOS_NUM
+
+# Líderes con visibilidad total (ven todos los empleados sin filtro de equipo)
+SUPER_LEADERS = {"5474", "5476", "5477", "5478", "5508"}
 
 MESES_ES = [
     "Enero","Febrero","Marzo","Abril","Mayo","Junio",
@@ -370,15 +376,25 @@ def list_bitacora(legajo: str) -> List[Dict]:
 
 def list_pendientes_lider(leader_legajo: str) -> List[Dict]:
     """Partes ENVIADOS de los empleados a cargo del líder."""
+    leader_legajo = str(leader_legajo).strip()
     with get_conn() as conn:
         cur = _cursor(conn)
-        cur.execute("""
-            SELECT p.legajo, per.nombre, p.periodo, p.estado, p.submitted_at
-            FROM rrhh_partes p
-            JOIN rrhh_personal per ON per.legajo = p.legajo
-            WHERE p.estado = 'ENVIADO' AND per.leader_legajo = %s
-            ORDER BY p.submitted_at DESC NULLS LAST, per.nombre
-        """, (str(leader_legajo).strip(),))
+        if leader_legajo in SUPER_LIDERES:
+            cur.execute("""
+                SELECT p.legajo, per.nombre, p.periodo, p.estado, p.submitted_at
+                FROM rrhh_partes p
+                JOIN rrhh_personal per ON per.legajo = p.legajo
+                WHERE p.estado = 'ENVIADO'
+                ORDER BY p.submitted_at DESC NULLS LAST, per.nombre
+            """)
+        else:
+            cur.execute("""
+                SELECT p.legajo, per.nombre, p.periodo, p.estado, p.submitted_at
+                FROM rrhh_partes p
+                JOIN rrhh_personal per ON per.legajo = p.legajo
+                WHERE p.estado = 'ENVIADO' AND per.leader_legajo = %s
+                ORDER BY p.submitted_at DESC NULLS LAST, per.nombre
+            """, (leader_legajo,))
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
         return rows
@@ -386,26 +402,46 @@ def list_pendientes_lider(leader_legajo: str) -> List[Dict]:
 
 def list_team_partes(leader_legajo: str, periodo: Optional[str] = None) -> List[Dict]:
     """Todos los partes del equipo del líder, opcionalmente filtrado por período."""
+    leader_legajo = str(leader_legajo).strip()
     with get_conn() as conn:
         cur = _cursor(conn)
-        if periodo:
-            cur.execute("""
-                SELECT p.legajo, per.nombre, per.funcion, p.periodo,
-                       p.estado, p.submitted_at, p.approved_at, p.rejection_comment
-                FROM rrhh_partes p
-                JOIN rrhh_personal per ON per.legajo = p.legajo
-                WHERE per.leader_legajo = %s AND p.periodo = %s
-                ORDER BY per.nombre
-            """, (str(leader_legajo).strip(), periodo))
+        if leader_legajo in SUPER_LIDERES:
+            if periodo:
+                cur.execute("""
+                    SELECT p.legajo, per.nombre, per.funcion, p.periodo,
+                           p.estado, p.submitted_at, p.approved_at, p.rejection_comment
+                    FROM rrhh_partes p
+                    JOIN rrhh_personal per ON per.legajo = p.legajo
+                    WHERE p.periodo = %s
+                    ORDER BY per.nombre
+                """, (periodo,))
+            else:
+                cur.execute("""
+                    SELECT p.legajo, per.nombre, per.funcion, p.periodo,
+                           p.estado, p.submitted_at, p.approved_at, p.rejection_comment
+                    FROM rrhh_partes p
+                    JOIN rrhh_personal per ON per.legajo = p.legajo
+                    ORDER BY p.periodo DESC, per.nombre
+                """)
         else:
-            cur.execute("""
-                SELECT p.legajo, per.nombre, per.funcion, p.periodo,
-                       p.estado, p.submitted_at, p.approved_at, p.rejection_comment
-                FROM rrhh_partes p
-                JOIN rrhh_personal per ON per.legajo = p.legajo
-                WHERE per.leader_legajo = %s
-                ORDER BY p.periodo DESC, per.nombre
-            """, (str(leader_legajo).strip(),))
+            if periodo:
+                cur.execute("""
+                    SELECT p.legajo, per.nombre, per.funcion, p.periodo,
+                           p.estado, p.submitted_at, p.approved_at, p.rejection_comment
+                    FROM rrhh_partes p
+                    JOIN rrhh_personal per ON per.legajo = p.legajo
+                    WHERE per.leader_legajo = %s AND p.periodo = %s
+                    ORDER BY per.nombre
+                """, (leader_legajo, periodo))
+            else:
+                cur.execute("""
+                    SELECT p.legajo, per.nombre, per.funcion, p.periodo,
+                           p.estado, p.submitted_at, p.approved_at, p.rejection_comment
+                    FROM rrhh_partes p
+                    JOIN rrhh_personal per ON per.legajo = p.legajo
+                    WHERE per.leader_legajo = %s
+                    ORDER BY p.periodo DESC, per.nombre
+                """, (leader_legajo,))
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
         return rows
@@ -468,15 +504,25 @@ def get_consolidado(leader_legajo: str, periodo: str) -> List[Dict]:
         cur = _cursor(conn)
 
         # 1 query: todos los empleados del equipo
-        cur.execute("""
-            SELECT per.legajo, per.nombre, per.funcion,
-                   p.estado, p.approved_at
-            FROM rrhh_personal per
-            LEFT JOIN rrhh_partes p
-                ON p.legajo = per.legajo AND p.periodo = %s
-            WHERE per.leader_legajo = %s
-            ORDER BY per.nombre
-        """, (periodo, leader_legajo))
+        if leader_legajo in SUPER_LIDERES:
+            cur.execute("""
+                SELECT per.legajo, per.nombre, per.funcion,
+                       p.estado, p.approved_at
+                FROM rrhh_personal per
+                LEFT JOIN rrhh_partes p
+                    ON p.legajo = per.legajo AND p.periodo = %s
+                ORDER BY per.nombre
+            """, (periodo,))
+        else:
+            cur.execute("""
+                SELECT per.legajo, per.nombre, per.funcion,
+                       p.estado, p.approved_at
+                FROM rrhh_personal per
+                LEFT JOIN rrhh_partes p
+                    ON p.legajo = per.legajo AND p.periodo = %s
+                WHERE per.leader_legajo = %s
+                ORDER BY per.nombre
+            """, (periodo, leader_legajo))
         empleados = [dict(r) for r in cur.fetchall()]
 
         # 1 query: todos los items del período para todo el equipo

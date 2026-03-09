@@ -1,59 +1,49 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import api from "@/lib/api";
-import type { ControlesInfo, ControlRow, MermaRow } from "@/lib/api";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import {
+  loadControles,
+  getControlesSnapshot,
+  subscribeControles,
+  invalidateControles,
+} from "@/lib/datastore";
+import type { ControlRow, MermaRow } from "@/lib/api";
 
 // ── Searchable Pozo Picker ────────────────────────────────
 function PozoPicker({ value, onChange, pozos }: { value: string; onChange: (v: string) => void; pozos: string[] }) {
-  const [query,    setQuery]    = useState(value);
-  const [open,     setOpen]     = useState(false);
-  const [focused,  setFocused]  = useState(false);
+  const [query,   setQuery]   = useState(value);
+  const [open,    setOpen]    = useState(false);
+  const [focused, setFocused] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => { if (!focused) setQuery(value); }, [value, focused]);
-
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false); setFocused(false);
-      }
+      if (ref.current && !ref.current.contains(e.target as Node)) { setOpen(false); setFocused(false); }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const filtered = query.trim() === ""
-    ? pozos
-    : pozos.filter(p => p.toLowerCase().includes(query.toLowerCase()));
-
-  const select = (p: string) => {
-    onChange(p); setQuery(p); setOpen(false); setFocused(false);
-  };
-  const clear = () => {
-    onChange(""); setQuery(""); setOpen(false);
-  };
+  const filtered = query.trim() === "" ? pozos : pozos.filter(p => p.toLowerCase().includes(query.toLowerCase()));
+  const select = (p: string) => { onChange(p); setQuery(p); setOpen(false); setFocused(false); };
+  const clear  = () => { onChange(""); setQuery(""); setOpen(false); };
 
   return (
     <div ref={ref} className="relative w-52">
       <div className="flex items-center bg-[#0f172a] border border-[#334155] rounded-lg overflow-hidden">
-        <input
-          value={query}
+        <input value={query}
           onChange={e => { setQuery(e.target.value); setOpen(true); onChange(""); }}
           onFocus={() => { setFocused(true); setOpen(true); }}
           placeholder="Buscar pozo..."
-          className="bg-transparent text-slate-200 text-xs px-3 py-1.5 w-full outline-none"
-        />
-        {query && (
-          <button onClick={clear} className="px-2 text-slate-500 hover:text-slate-300 text-xs">✕</button>
-        )}
+          className="bg-transparent text-slate-200 text-xs px-3 py-1.5 w-full outline-none" />
+        {query && <button onClick={clear} className="px-2 text-slate-500 hover:text-slate-300 text-xs">✕</button>}
       </div>
       {open && filtered.length > 0 && (
         <div className="absolute z-50 mt-1 w-full max-h-60 overflow-y-auto bg-[#1e293b] border border-[#334155] rounded-lg shadow-xl">
           {filtered.map(p => (
             <div key={p} onMouseDown={() => select(p)}
-              className={`px-3 py-1.5 text-xs cursor-pointer font-mono truncate transition-colors
-                ${p === value ? "bg-sky-700 text-white" : "text-slate-200 hover:bg-[#263348]"}`}>
+              className={`px-3 py-1.5 text-xs cursor-pointer font-mono truncate transition-colors ${p === value ? "bg-sky-700 text-white" : "text-slate-200 hover:bg-[#263348]"}`}>
               {p}
             </div>
           ))}
@@ -68,37 +58,31 @@ function PozoPicker({ value, onChange, pozos }: { value: string; onChange: (v: s
   );
 }
 
-// ── Dual scrollbar wrapper (scroll arriba y abajo) ────────
+// ── Dual scrollbar wrapper ────────────────────────────────
 function DualScrollTable({ children, totalWidth }: { children: React.ReactNode; totalWidth: number }) {
-  const topScrollRef   = useRef<HTMLDivElement>(null);
-  const tableWrapRef   = useRef<HTMLDivElement>(null);
-  const syncingTop     = useRef(false);
-  const syncingBottom  = useRef(false);
+  const topScrollRef  = useRef<HTMLDivElement>(null);
+  const tableWrapRef  = useRef<HTMLDivElement>(null);
+  const syncingTop    = useRef(false);
+  const syncingBottom = useRef(false);
 
   const onTopScroll = () => {
     if (syncingBottom.current) return;
     syncingTop.current = true;
-    if (tableWrapRef.current && topScrollRef.current)
-      tableWrapRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+    if (tableWrapRef.current && topScrollRef.current) tableWrapRef.current.scrollLeft = topScrollRef.current.scrollLeft;
     syncingTop.current = false;
   };
   const onBottomScroll = () => {
     if (syncingTop.current) return;
     syncingBottom.current = true;
-    if (topScrollRef.current && tableWrapRef.current)
-      topScrollRef.current.scrollLeft = tableWrapRef.current.scrollLeft;
+    if (topScrollRef.current && tableWrapRef.current) topScrollRef.current.scrollLeft = tableWrapRef.current.scrollLeft;
     syncingBottom.current = false;
   };
 
   return (
     <div style={{ width: "100%", overflow: "hidden" }}>
-      {/* Barra de scroll superior */}
-      <div ref={topScrollRef} onScroll={onTopScroll}
-        className="overflow-x-auto border-b border-[#334155]"
-        style={{ height: 12 }}>
+      <div ref={topScrollRef} onScroll={onTopScroll} className="overflow-x-auto border-b border-[#334155]" style={{ height: 12 }}>
         <div style={{ width: totalWidth, height: 1 }} />
       </div>
-      {/* Tabla con scroll inferior */}
       <div ref={tableWrapRef} onScroll={onBottomScroll} style={{ overflowX: "auto", overflowY: "visible" }}>
         {children}
       </div>
@@ -108,25 +92,21 @@ function DualScrollTable({ children, totalWidth }: { children: React.ReactNode; 
 
 type Vista = "controles" | "merma";
 
-// ── Helpers ───────────────────────────────────────────────
-const fmtDate  = (v?: string | null) => v ? v.slice(0, 16).replace("T", " ") : "—";
-const fmtNum   = (v?: number | null) =>
+const fmtDate = (v?: string | null) => v ? v.slice(0, 16).replace("T", " ") : "—";
+const fmtNum  = (v?: number | null) =>
   v == null ? "—" : v.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtPct   = (v?: number | null) =>
-  v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
+const fmtPct  = (v?: number | null) => v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
 
 function PctBadge({ v }: { v?: number | null }) {
   if (v == null) return <span className="text-slate-500">—</span>;
   const color = v < -20 ? "text-red-400" : v < 0 ? "text-orange-400" : "text-emerald-400";
   return <span className={`font-mono font-semibold ${color}`}>{fmtPct(v)}</span>;
 }
-
-function Diasbadge({ v }: { v?: number | null }) {
+function DiasBadge({ v }: { v?: number | null }) {
   if (v == null) return <span className="text-slate-500">—</span>;
   const color = v > 90 ? "text-red-400" : v > 45 ? "text-orange-400" : "text-slate-300";
   return <span className={`font-mono ${color}`}>{v}d</span>;
 }
-
 function KpiCard({ label, value, highlight, sub }: { label: string; value: string; highlight?: boolean; sub?: string }) {
   return (
     <div className="bg-[#1e293b] rounded-lg px-4 py-2.5 border border-[#334155] min-w-[140px]">
@@ -137,19 +117,24 @@ function KpiCard({ label, value, highlight, sub }: { label: string; value: strin
   );
 }
 
-// ============================================================
-// Página principal
-// ============================================================
 export default function ControlesHistoricosPage() {
-  const [vista, setVista]     = useState<Vista>("controles");
-  const [info,  setInfo]      = useState<ControlesInfo | null>(null);
-  const [controles, setControles] = useState<ControlRow[]>([]);
-  const [merma,     setMerma]     = useState<MermaRow[]>([]);
-  const [loading,   setLoading]   = useState(true);
-  const [error,     setError]     = useState<string | null>(null);
-  const [allPozos,  setAllPozos]  = useState<string[]>([]);
+  // ── Store global ───────────────────────────────────────
+  const [snap, setSnap] = useState(getControlesSnapshot);
 
-  // Filtros
+  useEffect(() => {
+    const unsub = subscribeControles(() => setSnap(getControlesSnapshot()));
+    loadControles();
+    return unsub;
+  }, []);
+
+  const loading     = snap.status === "loading" || snap.status === "idle";
+  const error       = snap.error;
+  const info        = snap.data?.info ?? null;
+  const allControles = snap.data?.controles ?? [];
+  const allMerma     = snap.data?.merma ?? [];
+
+  // ── Vista y filtros ────────────────────────────────────
+  const [vista, setVista] = useState<Vista>("controles");
   const [filtroPOZO,    setFiltroPOZO]    = useState("");
   const [filtroBATERIA, setFiltroBATERIA] = useState("");
   const [filtroESTADO,  setFiltroESTADO]  = useState("");
@@ -157,13 +142,57 @@ export default function ControlesHistoricosPage() {
   const [fechaHasta,    setFechaHasta]    = useState("");
   const [soloMerma,     setSoloMerma]     = useState(false);
 
-  // Sort
+  // ── Sort ───────────────────────────────────────────────
   const [sortKeyC, setSortKeyC] = useState<keyof ControlRow>("Fecha y Hora");
   const [sortDirC, setSortDirC] = useState<"asc" | "desc">("desc");
   const [sortKeyM, setSortKeyM] = useState<keyof MermaRow>("PCT_MERMA_NETA");
   const [sortDirM, setSortDirM] = useState<"asc" | "desc">("asc");
 
-  // Resize columnas
+  const handleSortC = (key: keyof ControlRow) => {
+    if (sortKeyC === key) setSortDirC(d => d === "asc" ? "desc" : "asc");
+    else { setSortKeyC(key); setSortDirC("asc"); }
+  };
+  const handleSortM = (key: keyof MermaRow) => {
+    if (sortKeyM === key) setSortDirM(d => d === "asc" ? "desc" : "asc");
+    else { setSortKeyM(key); setSortDirM("asc"); }
+  };
+
+  // ── Valores únicos para filtros (de la data completa) ──
+  const allPozos  = useMemo(() => Array.from(new Set(allControles.map(r => r.Pozo).filter(Boolean))).sort() as string[], [allControles]);
+  const baterias  = useMemo(() => Array.from(new Set(allControles.map(r => r.BATERIA).filter(Boolean))).sort() as string[], [allControles]);
+  const estados   = useMemo(() => Array.from(new Set(allControles.map(r => r.ESTADO_POZO).filter(Boolean))).sort() as string[], [allControles]);
+
+  // ── Filtrado y ordenamiento 100% en cliente ────────────
+  const sortedControles = useMemo(() => {
+    let rows = allControles;
+    if (filtroPOZO)    rows = rows.filter(r => r.Pozo === filtroPOZO);
+    if (filtroBATERIA) rows = rows.filter(r => r.BATERIA === filtroBATERIA);
+    if (filtroESTADO)  rows = rows.filter(r => r.ESTADO_POZO === filtroESTADO);
+    if (fechaDesde)    rows = rows.filter(r => r["Fecha y Hora"] && r["Fecha y Hora"] >= fechaDesde);
+    if (fechaHasta)    rows = rows.filter(r => r["Fecha y Hora"] && r["Fecha y Hora"] <= fechaHasta + "T23:59:59");
+    return [...rows].sort((a, b) => {
+      const va = a[sortKeyC] ?? "", vb = b[sortKeyC] ?? "";
+      if (va < vb) return sortDirC === "asc" ? -1 : 1;
+      if (va > vb) return sortDirC === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [allControles, filtroPOZO, filtroBATERIA, filtroESTADO, fechaDesde, fechaHasta, sortKeyC, sortDirC]);
+
+  const sortedMerma = useMemo(() => {
+    let rows = allMerma;
+    if (filtroPOZO)    rows = rows.filter(r => r.POZO === filtroPOZO);
+    if (filtroBATERIA) rows = rows.filter(r => r.BATERIA === filtroBATERIA);
+    if (filtroESTADO)  rows = rows.filter(r => r.ESTADO_POZO === filtroESTADO);
+    if (soloMerma)     rows = rows.filter(r => r.EN_MERMA_NETA);
+    return [...rows].sort((a, b) => {
+      const va = a[sortKeyM] ?? "", vb = b[sortKeyM] ?? "";
+      if (va < vb) return sortDirM === "asc" ? -1 : 1;
+      if (va > vb) return sortDirM === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [allMerma, filtroPOZO, filtroBATERIA, filtroESTADO, soloMerma, sortKeyM, sortDirM]);
+
+  // ── Resize columnas ────────────────────────────────────
   const [colWidthsC, setColWidthsC] = useState([160, 110, 150, 110, 90, 90, 90, 110, 140, 150, 150]);
   const [colWidthsM, setColWidthsM] = useState([160, 110, 130, 150, 150, 110, 90, 90, 90, 90, 90, 90, 90]);
   const resizingRef = useRef<{ colIdx: number; startX: number; startW: number; table: Vista } | null>(null);
@@ -184,76 +213,13 @@ export default function ControlesHistoricosPage() {
     window.addEventListener("mouseup", onUp);
   };
 
-  // Carga inicial de pozos sin filtro (para el picker)
-  useEffect(() => {
-    api.getControlesHistorico({ limit: 10000 }).then(res => {
-      const lista = Array.from(new Set(res.data.map(r => r.Pozo).filter(Boolean))).sort() as string[];
-      setAllPozos(lista);
-    }).catch(() => {});
+  // ── Actualizar forzado ─────────────────────────────────
+  const handleRefresh = useCallback(() => {
+    invalidateControles();
+    loadControles(true);
   }, []);
 
-  // ── Carga de datos ─────────────────────────────────────
-  const cargarDatos = useCallback(async () => {
-    setLoading(true); setError(null);
-    try {
-      const [infoData, controlesData, mermaData] = await Promise.all([
-        api.getControlesInfo(),
-        api.getControlesHistorico({
-          pozo:        filtroPOZO    || undefined,
-          bateria:     filtroBATERIA || undefined,
-          estado_pozo: filtroESTADO  || undefined,
-          fecha_desde: fechaDesde    || undefined,
-          fecha_hasta: fechaHasta    || undefined,
-          limit: 10000,
-        }),
-        api.getControlesMerma({
-          solo_merma:  soloMerma,
-          bateria:     filtroBATERIA || undefined,
-          estado_pozo: filtroESTADO  || undefined,
-          limit: 5000,
-        }),
-      ]);
-      setInfo(infoData);
-      setControles(controlesData.data);
-      setMerma(mermaData.data);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Error cargando datos");
-    }
-    setLoading(false);
-  }, [filtroPOZO, filtroBATERIA, filtroESTADO, fechaDesde, fechaHasta, soloMerma]);
-
-  useEffect(() => { cargarDatos(); }, [cargarDatos]);
-
-  // ── Sort controles ─────────────────────────────────────
-  const handleSortC = (key: keyof ControlRow) => {
-    if (sortKeyC === key) setSortDirC(d => d === "asc" ? "desc" : "asc");
-    else { setSortKeyC(key); setSortDirC("asc"); }
-  };
-  const handleSortM = (key: keyof MermaRow) => {
-    if (sortKeyM === key) setSortDirM(d => d === "asc" ? "desc" : "asc");
-    else { setSortKeyM(key); setSortDirM("asc"); }
-  };
-
-  const sortedControles = [...controles].sort((a, b) => {
-    const va = a[sortKeyC] ?? ""; const vb = b[sortKeyC] ?? "";
-    if (va < vb) return sortDirC === "asc" ? -1 : 1;
-    if (va > vb) return sortDirC === "asc" ? 1 : -1;
-    return 0;
-  });
-
-  const sortedMerma = [...merma].sort((a, b) => {
-    const va = a[sortKeyM] ?? ""; const vb = b[sortKeyM] ?? "";
-    if (va < vb) return sortDirM === "asc" ? -1 : 1;
-    if (va > vb) return sortDirM === "asc" ? 1 : -1;
-    return 0;
-  });
-
-  // ── Valores únicos para filtros ───────────────────────
-  const pozos    = allPozos;
-  const baterias = Array.from(new Set(controles.map(r => r.BATERIA).filter(Boolean))).sort() as string[];
-  const estados  = Array.from(new Set(controles.map(r => r.ESTADO_POZO).filter(Boolean))).sort() as string[];
-
-  // ── Exportar CSV ──────────────────────────────────────
+  // ── Exportar CSV ───────────────────────────────────────
   const exportarCSV = () => {
     const data = vista === "controles" ? sortedControles : sortedMerma;
     if (!data.length) return;
@@ -268,41 +234,35 @@ export default function ControlesHistoricosPage() {
     URL.revokeObjectURL(a.href);
   };
 
-  // ── KPIs ─────────────────────────────────────────────
-  const kpiControles = controles.length.toLocaleString();
-  const kpiPozos     = new Set(controles.map(r => r.Pozo)).size.toLocaleString();
-  const kpiMerma     = merma.filter(r => r.EN_MERMA_NETA).length.toLocaleString();
-  const kpiDias      = merma.length > 0
-    ? Math.round(merma.reduce((s, r) => s + (r.DIAS_SIN_CONTROL ?? 0), 0) / merma.length)
+  // ── KPIs ──────────────────────────────────────────────
+  const kpiControles = sortedControles.length.toLocaleString();
+  const kpiPozos     = new Set(sortedControles.map(r => r.Pozo)).size.toLocaleString();
+  const kpiMerma     = sortedMerma.filter(r => r.EN_MERMA_NETA).length.toLocaleString();
+  const kpiDias      = sortedMerma.length > 0
+    ? Math.round(sortedMerma.reduce((s, r) => s + (r.DIAS_SIN_CONTROL ?? 0), 0) / sortedMerma.length)
     : 0;
 
+  // ── Header helpers ─────────────────────────────────────
   const ThC = ({ label, k, i }: { label: string; k: keyof ControlRow; i: number }) => (
-    <th style={{ width: colWidthsC[i], minWidth: colWidthsC[i], position: "relative" }}
-      className="border-b border-[#334155] px-0 py-0 select-none">
-      <div onClick={() => handleSortC(k)}
-        className="flex items-center gap-1 px-2 py-2 cursor-pointer hover:bg-[#263348] text-xs font-semibold text-slate-400 uppercase tracking-wide">
+    <th style={{ width: colWidthsC[i], minWidth: colWidthsC[i], position: "relative" }} className="border-b border-[#334155] px-0 py-0 select-none">
+      <div onClick={() => handleSortC(k)} className="flex items-center gap-1 px-2 py-2 cursor-pointer hover:bg-[#263348] text-xs font-semibold text-slate-400 uppercase tracking-wide">
         <span className="truncate">{label}</span>
         {sortKeyC === k && <span className="text-sky-400 flex-shrink-0">{sortDirC === "asc" ? "↑" : "↓"}</span>}
       </div>
-      <div onMouseDown={e => startResize(e, i, "controles")}
-        style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 5, cursor: "col-resize", zIndex: 20 }}
-        className="hover:bg-sky-500 opacity-0 hover:opacity-100 transition-opacity" />
+      <div onMouseDown={e => startResize(e, i, "controles")} style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 5, cursor: "col-resize", zIndex: 20 }} className="hover:bg-sky-500 opacity-0 hover:opacity-100 transition-opacity" />
     </th>
   );
-
   const ThM = ({ label, k, i, right }: { label: string; k: keyof MermaRow; i: number; right?: boolean }) => (
-    <th style={{ width: colWidthsM[i], minWidth: colWidthsM[i], position: "relative" }}
-      className="border-b border-[#334155] px-0 py-0 select-none">
-      <div onClick={() => handleSortM(k)}
-        className={`flex items-center gap-1 px-2 py-2 cursor-pointer hover:bg-[#263348] text-xs font-semibold text-slate-400 uppercase tracking-wide ${right ? "justify-end" : ""}`}>
+    <th style={{ width: colWidthsM[i], minWidth: colWidthsM[i], position: "relative" }} className="border-b border-[#334155] px-0 py-0 select-none">
+      <div onClick={() => handleSortM(k)} className={`flex items-center gap-1 px-2 py-2 cursor-pointer hover:bg-[#263348] text-xs font-semibold text-slate-400 uppercase tracking-wide ${right ? "justify-end" : ""}`}>
         <span className="truncate">{label}</span>
         {sortKeyM === k && <span className="text-sky-400 flex-shrink-0">{sortDirM === "asc" ? "↑" : "↓"}</span>}
       </div>
-      <div onMouseDown={e => startResize(e, i, "merma")}
-        style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 5, cursor: "col-resize", zIndex: 20 }}
-        className="hover:bg-sky-500 opacity-0 hover:opacity-100 transition-opacity" />
+      <div onMouseDown={e => startResize(e, i, "merma")} style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 5, cursor: "col-resize", zIndex: 20 }} className="hover:bg-sky-500 opacity-0 hover:opacity-100 transition-opacity" />
     </th>
   );
+
+  const hayFiltros = filtroPOZO || filtroBATERIA || filtroESTADO || fechaDesde || fechaHasta;
 
   return (
     <div className="flex flex-col h-full bg-[#0f172a]">
@@ -327,7 +287,7 @@ export default function ControlesHistoricosPage() {
             </svg>
             Exportar CSV
           </button>
-          <button onClick={cargarDatos} disabled={loading}
+          <button onClick={handleRefresh} disabled={loading}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 transition-colors">
             <svg className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -341,7 +301,7 @@ export default function ControlesHistoricosPage() {
       <div className="flex flex-wrap gap-3 px-6 py-3 border-b border-[#334155] bg-[#1e293b]">
         <div className="flex flex-col gap-1">
           <label className="text-xs text-slate-400">Pozo</label>
-          <PozoPicker value={filtroPOZO} onChange={setFiltroPOZO} pozos={pozos} />
+          <PozoPicker value={filtroPOZO} onChange={setFiltroPOZO} pozos={allPozos} />
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs text-slate-400">Batería</label>
@@ -369,7 +329,7 @@ export default function ControlesHistoricosPage() {
           <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)}
             className="bg-[#0f172a] border border-[#334155] text-slate-200 text-xs rounded-lg px-3 py-1.5" />
         </div>
-        {(filtroPOZO || filtroBATERIA || filtroESTADO || fechaDesde || fechaHasta) && (
+        {hayFiltros && (
           <div className="flex flex-col justify-end">
             <button onClick={() => { setFiltroPOZO(""); setFiltroBATERIA(""); setFiltroESTADO(""); setFechaDesde(""); setFechaHasta(""); }}
               className="text-xs text-slate-400 hover:text-slate-200 px-3 py-1.5 border border-[#334155] rounded-lg transition-colors">
@@ -377,14 +337,22 @@ export default function ControlesHistoricosPage() {
             </button>
           </div>
         )}
+        {snap.status === "ready" && (
+          <div className="flex flex-col justify-end ml-auto">
+            <span className="text-xs text-emerald-500 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+              {allControles.length.toLocaleString()} controles en memoria
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ── KPIs ── */}
       {!loading && (
         <div className="flex flex-wrap gap-3 px-6 py-3 border-b border-[#334155]">
-          <KpiCard label="Controles"   value={kpiControles} />
-          <KpiCard label="Pozos únicos" value={kpiPozos} />
-          <KpiCard label="En merma neta" value={kpiMerma} highlight sub="último vs penúltimo control" />
+          <KpiCard label="Controles"            value={kpiControles} />
+          <KpiCard label="Pozos únicos"          value={kpiPozos} />
+          <KpiCard label="En merma neta"         value={kpiMerma} highlight sub="último vs penúltimo control" />
           <KpiCard label="Días prom. sin control" value={`${kpiDias}d`} sub="sobre pozos analizados" />
         </div>
       )}
@@ -393,18 +361,13 @@ export default function ControlesHistoricosPage() {
       <div className="flex gap-0 px-6 pt-3 border-b border-[#334155]">
         {(["controles", "merma"] as Vista[]).map(v => (
           <button key={v} onClick={() => setVista(v)}
-            className={`px-5 py-2 text-sm font-medium border-b-2 transition-colors ${
-              vista === v
-                ? "border-sky-400 text-sky-400"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}>
-            {v === "controles" ? `Todos los controles (${controles.length.toLocaleString()})` : `Merma por pozo (${merma.length.toLocaleString()})`}
+            className={`px-5 py-2 text-sm font-medium border-b-2 transition-colors ${vista === v ? "border-sky-400 text-sky-400" : "border-transparent text-slate-400 hover:text-slate-200"}`}>
+            {v === "controles" ? `Todos los controles (${sortedControles.length.toLocaleString()})` : `Merma por pozo (${sortedMerma.length.toLocaleString()})`}
           </button>
         ))}
         {vista === "merma" && (
           <label className="ml-auto flex items-center gap-2 text-xs text-slate-400 cursor-pointer mb-1">
-            <input type="checkbox" checked={soloMerma} onChange={e => setSoloMerma(e.target.checked)}
-              className="accent-sky-400" />
+            <input type="checkbox" checked={soloMerma} onChange={e => setSoloMerma(e.target.checked)} className="accent-sky-400" />
             Solo pozos en merma
           </label>
         )}
@@ -417,6 +380,7 @@ export default function ControlesHistoricosPage() {
             <div className="text-center">
               <div className="w-8 h-8 border-2 border-sky-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
               <p className="text-slate-400 text-sm">Cargando controles...</p>
+              <p className="text-slate-500 text-xs mt-1">Solo la primera vez</p>
             </div>
           </div>
         ) : error ? (
@@ -424,8 +388,6 @@ export default function ControlesHistoricosPage() {
             <p className="text-red-400 text-sm">{error}</p>
           </div>
         ) : vista === "controles" ? (
-
-          /* ── Tabla Controles ── */
           sortedControles.length === 0 ? (
             <div className="flex items-center justify-center h-64">
               <p className="text-slate-500 text-sm">No hay datos para los filtros seleccionados.</p>
@@ -468,10 +430,7 @@ export default function ControlesHistoricosPage() {
               </table>
             </div>
           )
-
         ) : (
-
-          /* ── Tabla Merma ── */
           sortedMerma.length === 0 ? (
             <div className="flex items-center justify-center h-64">
               <p className="text-slate-500 text-sm">No hay datos de merma disponibles.</p>
@@ -482,7 +441,7 @@ export default function ControlesHistoricosPage() {
               <table className="text-left" style={{ borderCollapse: "collapse", minWidth: colWidthsM.reduce((a, b) => a + b, 0) }}>
                 <thead className="bg-[#1e293b] sticky top-0 z-10">
                   <tr>
-                    <ThM i={0}  k="POZO"               label="Pozo" />
+                    <ThM i={0}  k="POZO"                label="Pozo" />
                     <ThM i={1}  k="BATERIA"             label="Batería" />
                     <ThM i={2}  k="DIAS_SIN_CONTROL"    label="Días sin ctrl." right />
                     <ThM i={3}  k="ESTADO_POZO"         label="Estado Pozo" />
@@ -502,7 +461,7 @@ export default function ControlesHistoricosPage() {
                     <tr key={i} className={`border-b border-[#1a2535] hover:bg-[#1e293b] transition-colors ${i % 2 === 0 ? "bg-[#0f172a]" : "bg-[#0d1526]"}`}>
                       <td style={{ width: colWidthsM[0]  }} className="px-2 py-1.5 font-mono text-xs text-slate-300 truncate">{row.POZO ?? "—"}</td>
                       <td style={{ width: colWidthsM[1]  }} className="px-2 py-1.5 text-xs text-slate-400 truncate">{row.BATERIA ?? "—"}</td>
-                      <td style={{ width: colWidthsM[2]  }} className="px-2 py-1.5 text-xs text-right"><Diasbadge v={row.DIAS_SIN_CONTROL} /></td>
+                      <td style={{ width: colWidthsM[2]  }} className="px-2 py-1.5 text-xs text-right"><DiasBadge v={row.DIAS_SIN_CONTROL} /></td>
                       <td style={{ width: colWidthsM[3]  }} className="px-2 py-1.5 text-xs text-slate-400 truncate">{row.ESTADO_POZO ?? "—"}</td>
                       <td style={{ width: colWidthsM[4]  }} className="px-2 py-1.5 text-xs text-slate-400 truncate">{row.SIST_EXTRACCION ?? "—"}</td>
                       <td style={{ width: colWidthsM[5]  }} className="px-2 py-1.5 text-xs text-slate-400 truncate">{row.FECHA_ULTIMO_CONTROL ?? "—"}</td>

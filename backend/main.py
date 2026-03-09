@@ -55,6 +55,7 @@ from api.merma           import router as merma_router
 from api.rrhh            import router as rrhh_router
 from api.alertas_llenado import router as alertas_llenado_router
 from api.controles       import router as controles_router
+from api.chat            import router as chat_router
 
 
 # ==========================================================
@@ -384,6 +385,12 @@ app.include_router(
     rrhh_router,
     prefix = "/api/rrhh",
     tags   = ["RRHH — Guardias y partes mensuales"],
+)
+
+app.include_router(
+    chat_router,
+    prefix = "/api/chat",
+    tags   = ["Chat — Asistente IA"],
 )
 
 

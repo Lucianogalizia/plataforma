@@ -283,7 +283,8 @@ async def aprobar_parte(legajo: str, periodo: str, body: AprobarBody):
     if parte["estado"] != "ENVIADO":
         raise HTTPException(400, f"Solo se pueden aprobar partes ENVIADOS. Estado: {parte['estado']}.")
     person = db.get_person(legajo)
-    if not person or str(person.get("leader_legajo","")).strip() != str(body.aprobador_legajo).strip():
+    aprobador = str(body.aprobador_legajo).strip()
+    if not person or (aprobador not in db.SUPER_LIDERES and str(person.get("leader_legajo","")).strip() != aprobador):
         raise HTTPException(403, "No tenés permiso para aprobar este parte.")
     db.update_parte_estado(legajo, periodo, "APROBADO",
                            approved_at=db.utcnow_str(),
@@ -307,7 +308,8 @@ async def rechazar_parte(legajo: str, periodo: str, body: RechazarBody):
     if parte["estado"] != "ENVIADO":
         raise HTTPException(400, f"Solo se pueden rechazar partes ENVIADOS. Estado: {parte['estado']}.")
     person = db.get_person(legajo)
-    if not person or str(person.get("leader_legajo","")).strip() != str(body.aprobador_legajo).strip():
+    aprobador = str(body.aprobador_legajo).strip()
+    if not person or (aprobador not in db.SUPER_LIDERES and str(person.get("leader_legajo","")).strip() != aprobador):
         raise HTTPException(403, "No tenés permiso para rechazar este parte.")
     db.update_parte_estado(legajo, periodo, "RECHAZADO",
                            approved_by_legajo=body.aprobador_legajo,

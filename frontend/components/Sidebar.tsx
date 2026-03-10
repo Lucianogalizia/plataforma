@@ -59,6 +59,11 @@ const NAV = [
     icon: BarChart2,
   },
   {
+    label: "Instalación de Fondo",
+    href: "/instalacion-fondo",
+    icon: Activity,
+  },
+  {
     label: "RRHH",
     href: "/rrhh",
     icon: Users,

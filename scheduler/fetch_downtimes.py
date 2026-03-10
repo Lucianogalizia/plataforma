@@ -323,25 +323,7 @@ def daterange(d1: date, d2: date):
         d += timedelta(days=1)
 
 
-def nullify_active_downtimes(df: pd.DataFrame, hoy: date) -> pd.DataFrame:
-    """
-    FIX: las paradas activas tienen FECHA HASTA > hoy (proyectada
-    al próximo corte 07:00). Las marcamos con FECHA HASTA = null
-    para no mostrar fechas futuras falsas en el frontend.
-    Al día siguiente el scheduler las re-descarga con el valor real.
-    """
-    if "FECHA HASTA" not in df.columns:
-        return df
 
-    df = df.copy()
-    df["FECHA HASTA"] = pd.to_datetime(df["FECHA HASTA"], errors="coerce")
-    hoy_ts = pd.Timestamp(hoy)
-    activas = df["FECHA HASTA"] > hoy_ts
-    n_activas = activas.sum()
-    if n_activas:
-        df.loc[activas, "FECHA HASTA"] = pd.NaT
-        print(f"  ⏳ Paradas activas (FECHA HASTA > hoy) marcadas como null: {n_activas}")
-    return df
 
 
 # ==========================================================
@@ -419,9 +401,6 @@ def main():
 
     df_new = pd.concat(all_frames, ignore_index=True)
 
-    # FIX: marcar paradas activas con FECHA HASTA = null
-    df_new = nullify_active_downtimes(df_new, HOY)
-
     # Merge con histórico
     if df_prev is not None and not df_prev.empty:
         # FIX: eliminar del histórico los días que re-fetcheamos
@@ -440,9 +419,8 @@ def main():
     else:
         df_all = df_new
 
-    # FIX: clave de dedup usa FECHA HASTA en lugar de FECHA DESDE
-    # para no depender de un campo que puede ser nulo
-    key_cols = [c for c in ["POZO", "RUBRO", "FECHA HASTA"] if c in df_all.columns]
+    # Clave de dedup: POZO + RUBRO + FECHA DESDE (única por parada)
+    key_cols = [c for c in ["POZO", "RUBRO", "FECHA DESDE"] if c in df_all.columns]
     if key_cols:
         antes  = len(df_all)
         df_all = df_all.drop_duplicates(subset=key_cols, keep="last")

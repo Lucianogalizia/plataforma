@@ -54,6 +54,11 @@ const NAV = [
     icon: Activity,
   },
   {
+    label: "Predicción Alta Presión",
+    href: "/alertas-presion",
+    icon: TrendingUp,
+  },
+  {
     label: "Controles Históricos",
     href: "/controles-historicos",
     icon: BarChart2,

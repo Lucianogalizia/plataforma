@@ -34,6 +34,7 @@ export default function EstadisticasPage() {
   const [balRange, setBalRange] = useState<[number,number]>([0,200]);
   const [origenSel, setOrigenSel] = useState<string[]>([]);
   const [origenOpts, setOrigenOpts] = useState<string[]>([]);
+  const [pozoSearch, setPozoSearch] = useState("");
 
   const [trendVar, setTrendVar] = useState("Sumergencia");
   const [minPts, setMinPts] = useState(4);
@@ -118,6 +119,7 @@ export default function EstadisticasPage() {
     if (r.Sumergencia != null && (r.Sumergencia < sumRange[0] || r.Sumergencia > sumRange[1])) return false;
     if (r["%Estructura"] != null && (r["%Estructura"]! < estRange[0] || r["%Estructura"]! > estRange[1])) return false;
     if (r["%Balance"] != null && (r["%Balance"]! < balRange[0] || r["%Balance"]! > balRange[1])) return false;
+    if (pozoSearch && !r.NO_key?.toLowerCase().includes(pozoSearch.toLowerCase())) return false;
     return true;
   });
 
@@ -234,6 +236,32 @@ export default function EstadisticasPage() {
                 <label className="text-xs text-slate-400 block mb-1">Rango %Balance: {balRange[0].toFixed(1)} – {balRange[1].toFixed(1)}</label>
                 <input type="range" min={0} max={balRange[1]} step={0.1} value={balRange[0]} onChange={(e) => setBalRange([+e.target.value, balRange[1]])} className="accent-sky-400 w-32" />
                 <input type="range" min={balRange[0]} max={200} step={0.1} value={balRange[1]} onChange={(e) => setBalRange([balRange[0], +e.target.value])} className="accent-sky-400 w-32 ml-2" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Buscar pozo (NO_KEY)</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={pozoSearch}
+                    onChange={(e) => setPozoSearch(e.target.value)}
+                    placeholder="Escribí el nombre del pozo..."
+                    list="pozo-options"
+                    className="bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-400 w-56"
+                  />
+                  {pozoSearch && (
+                    <button
+                      onClick={() => setPozoSearch("")}
+                      className="text-xs text-slate-400 hover:text-slate-200 underline whitespace-nowrap"
+                    >
+                      limpiar
+                    </button>
+                  )}
+                </div>
+                <datalist id="pozo-options">
+                  {[...new Set(snap.map(r => r.NO_key).filter(Boolean))].sort().map(p => (
+                    <option key={p} value={p} />
+                  ))}
+                </datalist>
               </div>
             </div>
           </div>

@@ -327,9 +327,38 @@ def _ejecutar_tool(nombre: str, args: dict) -> Any:
                                  "Sumergencia_base", "Bba Llenado", "Caudal bruto efec",
                                  "%Balance", "%Estructura", "Dias_desde_ultima"] if c in snap.columns]
             total = len(snap)
+            records = _clean_records(snap[cols], 50)
+
+            # Si se buscó un pozo específico y la Sumergencia es null,
+            # enriquecer automáticamente desde el índice DIN completo
+            if pozo_raw and records:
+                for rec in records:
+                    sumer = rec.get("Sumergencia")
+                    if sumer is None:
+                        try:
+                            from api.din import _load_indexes_with_keys
+                            from core.consolidado import build_pozo_consolidado
+                            from core.parsers import safe_to_float
+                            no_key = rec.get("NO_key", "")
+                            din_ok2, niv_ok2, col_map2 = _load_indexes_with_keys()
+                            dfp2 = build_pozo_consolidado(
+                                din_ok2, niv_ok2, no_key,
+                                col_map2["din_no_col"], col_map2["din_fe_col"], col_map2["din_ho_col"],
+                                col_map2["niv_no_col"], col_map2["niv_fe_col"], col_map2["niv_ho_col"],
+                            )
+                            if not dfp2.empty and "Sumergencia" in dfp2.columns:
+                                dfp2["Sumergencia"] = pd.to_numeric(dfp2["Sumergencia"], errors="coerce")
+                                last = dfp2.dropna(subset=["Sumergencia"]).sort_values("DT_plot").iloc[-1] if not dfp2.dropna(subset=["Sumergencia"]).empty else None
+                                if last is not None:
+                                    rec["Sumergencia"] = round(float(last["Sumergencia"]), 1)
+                                    rec["Sumergencia_base"] = last.get("Sumergencia_base")
+                                    rec["_sumergencia_fuente"] = "indice_din"
+                        except Exception:
+                            pass  # Si falla el enriquecimiento, devolver lo que había
+
             return {"total_pozos": total, "mostrando": min(50, total),
                     "nota": "Primeros 50 resultados." if total > 50 else "",
-                    "pozos": _clean_records(snap[cols], 50)}
+                    "pozos": records}
         except Exception as e:
             return {"error": f"get_snapshot_pozos: {e}"}
 
@@ -601,11 +630,18 @@ DATOS DE UN POZO ESPECÍFICO (nombre exacto o aproximado):
 - Mediciones mecánicas (carrera, contrapesos, torque, GPM, Bba Prof) → get_mediciones_din_pozo(pozo=nombre)
 - Niveles NIV históricos (NC, NM, ND, PB) → get_historico_niv(pozo=nombre)
 - Producción histórica → get_controles_historico(pozo=nombre)
-- Validaciones de sumergencia → get_validaciones_pozo(pozo=nombre)
+- Validaciones de sumergencia (resumen global) → get_resumen_validaciones
+- Validaciones de sumergencia (por pozo) → get_validaciones_pozo(pozo=nombre)
 - Pérdidas históricas de un pozo → get_downtimes_perdidas(pozo=nombre)
+- Detalle completo del pozo (coords, semáforo) → get_detalle_pozo(pozo=nombre)
+- Buscar pozos por tipo de problema → buscar_por_problematica(problema=texto)
 IMPORTANTE: Para cualquier pregunta sobre un pozo específico, SIEMPRE consultá
 get_snapshot_pozos(pozo=nombre) primero — devuelve sumergencia/llenado/caudal aunque
 no haya diagnóstico IA generado. El snapshot tiene TODOS los pozos con mediciones.
+Si get_snapshot_pozos devuelve Sumergencia=null para un pozo específico, OBLIGATORIO
+llamar también a get_historico_sumergencia(pozo=nombre) para obtener el valor real
+desde el índice DIN completo. NUNCA digas "no hay datos de sumergencia" sin haber
+llamado primero a get_historico_sumergencia.
 
 ESTADO GENERAL DEL CAMPO:
 - KPIs globales → get_kpis_diagnosticos + get_stats_campo

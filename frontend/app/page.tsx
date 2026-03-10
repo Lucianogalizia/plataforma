@@ -62,21 +62,30 @@ export default function DashboardPage() {
       desc: "Dashboard interactivo de análisis de merma de producción. Generado por script local.",
       color: "amber",
     },
+    {
+      href: "/instalacion-fondo",
+      icon: Activity,
+      label: "Instalación de Fondo",
+      desc: "Visualizador IF por pozo: tubing, varillas, cañería y punzados. Generado por script local.",
+      color: "emerald",
+    },
   ];
 
   const colorBorder: Record<string, string> = {
-    sky:    "border-sky-500/30    hover:border-sky-400",
-    green:  "border-green-500/30  hover:border-green-400",
-    orange: "border-orange-500/30 hover:border-orange-400",
-    purple: "border-purple-500/30 hover:border-purple-400",
-    amber:  "border-amber-500/30  hover:border-amber-400",
+    sky:     "border-sky-500/30    hover:border-sky-400",
+    green:   "border-green-500/30  hover:border-green-400",
+    orange:  "border-orange-500/30 hover:border-orange-400",
+    purple:  "border-purple-500/30 hover:border-purple-400",
+    amber:   "border-amber-500/30  hover:border-amber-400",
+    emerald: "border-emerald-500/30 hover:border-emerald-400",
   };
   const colorIcon: Record<string, string> = {
-    sky:    "text-sky-400",
-    green:  "text-green-400",
-    orange: "text-orange-400",
-    purple: "text-purple-400",
-    amber:  "text-amber-400",
+    sky:     "text-sky-400",
+    green:   "text-green-400",
+    orange:  "text-orange-400",
+    purple:  "text-purple-400",
+    amber:   "text-amber-400",
+    emerald: "text-emerald-400",
   };
 
   return (

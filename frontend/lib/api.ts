@@ -619,6 +619,18 @@ export const api = {
     }>("/api/alertas-llenado/info", 30 * 1000),
 
   // ==========================================================
+  // PREDICCIÓN ALTA PRESIÓN
+  // ==========================================================
+  getAlertasPresionInfo: () =>
+    apiGetCached<{
+      exists: boolean;
+      updated_at: string | null;
+      file?: string;
+      size_kb?: number;
+      error?: string;
+    }>("/api/alertas-presion/info", 30 * 1000),
+
+  // ==========================================================
   // INSTALACIÓN DE FONDO
   // ==========================================================
   getInstalacionFondoInfo: () =>

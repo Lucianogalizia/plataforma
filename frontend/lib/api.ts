@@ -618,6 +618,18 @@ export const api = {
       error?: string;
     }>("/api/alertas-llenado/info", 30 * 1000),
 
+  // ==========================================================
+  // INSTALACIÓN DE FONDO
+  // ==========================================================
+  getInstalacionFondoInfo: () =>
+    apiGetCached<{
+      exists: boolean;
+      updated_at: string | null;
+      file?: string;
+      size_kb?: number;
+      error?: string;
+    }>("/api/instalacion-fondo/info", 30 * 1000),
+
 
   // ==========================================================
   // CONTROLES HISTÓRICOS

@@ -50,8 +50,9 @@ TOOLS = [
     # ── SNAPSHOT / ESTADO ACTUAL ───────────────────────────
     {"type":"function","function":{
         "name":"get_snapshot_pozos",
-        "description":"Estado actual de todos los pozos: sumergencia, llenado de bomba, caudal, balance, estructura, días desde última medición. Usar para preguntas generales del campo o comparar pozos.",
+        "description":"Estado actual de pozos: sumergencia, llenado de bomba, caudal, balance, estructura, días desde última medición. Usar para preguntas generales del campo, comparar pozos, o consultar sumergencia/llenado/caudal de un pozo específico cuando no hay diagnóstico generado.",
         "parameters":{"type":"object","properties":{
+            "pozo":{"type":"string","description":"Nombre de un pozo específico (búsqueda aproximada). Si se indica, devuelve solo ese pozo."},
             "bateria":{"type":"string","description":"Filtrar por batería."},
             "con_sumergencia_baja":{"type":"boolean","description":"Si true, solo pozos con sumergencia < 50m."}},"required":[]}}},
 
@@ -304,11 +305,20 @@ def _ejecutar_tool(nombre: str, args: dict) -> Any:
     elif nombre == "get_snapshot_pozos":
         try:
             from core.gcs import load_snapshot
+            pozo_raw = args.get("pozo", "").strip()
             bateria = args.get("bateria", "").strip()
             bajo = args.get("con_sumergencia_baja", False)
             snap = load_snapshot()
             if snap is None or snap.empty:
                 return {"error": "No hay snapshot disponible."}
+            # Filtro por pozo especifico (busqueda aproximada)
+            if pozo_raw and "NO_key" in snap.columns:
+                busqueda = pozo_raw.upper().replace(" ", "")
+                mask = snap["NO_key"].str.upper().str.replace(" ", "", regex=False).str.contains(busqueda, regex=False)
+                snap_filtrado = snap[mask]
+                if snap_filtrado.empty:
+                    return {"error": f"No se encontro el pozo '{pozo_raw}' en el snapshot."}
+                snap = snap_filtrado
             if bateria and "Bateria" in snap.columns:
                 snap = snap[snap["Bateria"].str.upper() == bateria.upper()]
             if bajo and "Sumergencia" in snap.columns:
@@ -575,25 +585,64 @@ def _ejecutar_tool(nombre: str, args: dict) -> Any:
 SYSTEM_PROMPT = """Sos el asistente técnico de la Plataforma DINA,
 sistema de análisis dinamométrico e inteligencia operativa de pozos petroleros.
 
-REGLAS:
-1. Usás las tools para obtener datos reales ANTES de responder.
-2. Si una tool devuelve {"error": "..."}, informás el error al usuario.
-3. NUNCA inventás valores, pozos, fechas ni datos.
+REGLAS GENERALES:
+1. Usás las tools para obtener datos reales ANTES de responder. Nunca respondas de memoria.
+2. Si una tool devuelve error, reportá el error exacto al usuario.
+3. NUNCA inventés valores, pozos, fechas ni datos.
 4. Respondés en español, de forma concisa y técnica.
-5. Podés combinar múltiples tools en una misma respuesta si hace falta.
-6. Para preguntas de un pozo específico → get_diagnostico_pozo + get_historico_niv.
-7. Para estado general del campo → get_snapshot_pozos + get_kpis_diagnosticos.
-8. Para producción → get_controles_merma + get_controles_historico.
-9. Para acciones de optimización → get_kpis_acciones + get_acciones.
-10. Para RRHH → get_rrhh_personal o get_rrhh_pendientes.
+5. Combiná múltiples tools en la misma respuesta cuando la pregunta lo requiera.
 
-Contexto técnico para interpretar datos:
-- sumergencia: metros de fluido sobre la bomba (más es mejor)
-- llenado / Bba Llenado: % de llenado de la cámara de la bomba (>70% = ok)
-- pct_merma_neta: caída % de producción neta respecto al período anterior
-- dias_sin_control: días sin medición de producción
-- %Balance: balance mecánico de la unidad AIB (ideal ~100%)
-- %Estructura: carga sobre la estructura (no superar 100%)"""
+GUÍA DE TOOLS — cuándo usar cada una:
+
+DATOS DE UN POZO ESPECÍFICO (nombre exacto o aproximado):
+- Sumergencia, llenado, caudal, balance → get_snapshot_pozos(pozo=nombre)
+- Evolución histórica de sumergencia → get_historico_sumergencia(pozo=nombre)
+- Diagnóstico IA (problemáticas, recomendación) → get_diagnostico_pozo(pozo=nombre)
+- Mediciones mecánicas (carrera, contrapesos, torque, GPM, Bba Prof) → get_mediciones_din_pozo(pozo=nombre)
+- Niveles NIV históricos (NC, NM, ND, PB) → get_historico_niv(pozo=nombre)
+- Producción histórica → get_controles_historico(pozo=nombre)
+- Validaciones de sumergencia → get_validaciones_pozo(pozo=nombre)
+- Pérdidas históricas de un pozo → get_downtimes_perdidas(pozo=nombre)
+IMPORTANTE: Para cualquier pregunta sobre un pozo específico, SIEMPRE consultá
+get_snapshot_pozos(pozo=nombre) primero — devuelve sumergencia/llenado/caudal aunque
+no haya diagnóstico IA generado. El snapshot tiene TODOS los pozos con mediciones.
+
+ESTADO GENERAL DEL CAMPO:
+- KPIs globales → get_kpis_diagnosticos + get_stats_campo
+- Pozos críticos/con problemas → get_pozos_criticos
+- Semáforo AIB → get_semaforo_aib
+- Tendencias (pozos empeorando) → get_tendencias
+- Cobertura de mediciones → get_pozos_por_mes + get_cobertura_din
+- Baterías disponibles → get_lista_baterias
+
+PRODUCCIÓN Y PÉRDIDAS:
+- Merma de producción por pozo → get_controles_merma + get_kpis_controles
+- Histórico de pérdidas acumuladas (shortfall) → get_downtimes_perdidas + get_kpis_perdidas
+- Historial de controles → get_controles_historico
+
+ACCIONES DE OPTIMIZACIÓN:
+- KPIs y lista → get_kpis_acciones + get_acciones
+
+RRHH:
+- Personal → get_rrhh_personal
+- Períodos disponibles → get_rrhh_periodos
+- Parte de un empleado → get_rrhh_parte(legajo=...)
+- Historial de partes → get_rrhh_bitacora(legajo=...)
+- Pendientes de aprobación → get_rrhh_pendientes(leader_legajo=...)
+- Consolidado del equipo → get_rrhh_consolidado(leader_legajo=..., periodo=...)
+
+SISTEMA:
+- Estado del sistema → get_info_sistema
+
+CONTEXTO TÉCNICO:
+- sumergencia: metros de fluido sobre la bomba (>200m = buena; <100m = crítica; más es mejor)
+- Bba Llenado / llenado: % llenado de cámara de bomba (>70% ok; <50% = problema)
+- %Balance: balance mecánico AIB (ideal ~100%; desviación indica desbalance de contrapesos)
+- %Estructura: carga sobre estructura (no superar 100%)
+- Caudal bruto efec: producción total en m³/día
+- Contrapeso actual vs ideal: diferencia indica desbalance mecánico
+- Golpeo de fondo: bomba toca fondo del tubing — riesgo de daño mecánico
+- pct_merma_neta: caída % de producción neta respecto al período anterior"""
 
 
 # ==========================================================
@@ -645,7 +694,7 @@ async def chat(req: ChatRequest):
 
     tools_usadas: list[str] = []
     response = client.chat.completions.create(
-        model="gpt-5.2", messages=messages, tools=TOOLS,
+        model="gpt-4o-mini", messages=messages, tools=TOOLS,
         tool_choice="auto", max_tokens=1500, temperature=0,
     )
     msg_resp = response.choices[0].message

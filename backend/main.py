@@ -53,9 +53,9 @@ from api.diagnosticos import router as diagnosticos_router
 from api.acciones     import router as acciones_router
 from api.merma           import router as merma_router
 from api.rrhh            import router as rrhh_router
-from api.alertas_llenado import router as alertas_llenado_router
-from api.controles       import router as controles_router
-from api.chat            import router as chat_router
+from api.alertas_llenado    import router as alertas_llenado_router
+from api.controles          import router as controles_router
+from api.instalacion_fondo  import router as instalacion_fondo_router
 
 
 # ==========================================================
@@ -380,17 +380,17 @@ app.include_router(
     tags   = ["Controles — Histórico de controles de producción"],
 )
 
+app.include_router(
+    instalacion_fondo_router,
+    prefix = "/api/instalacion-fondo",
+    tags   = ["Instalación de Fondo — Visualizador IF"],
+)
+
 
 app.include_router(
     rrhh_router,
     prefix = "/api/rrhh",
     tags   = ["RRHH — Guardias y partes mensuales"],
-)
-
-app.include_router(
-    chat_router,
-    prefix = "/api/chat",
-    tags   = ["Chat — Asistente IA"],
 )
 
 

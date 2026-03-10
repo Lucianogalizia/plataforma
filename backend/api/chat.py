@@ -645,7 +645,7 @@ async def chat(req: ChatRequest):
 
     tools_usadas: list[str] = []
     response = client.chat.completions.create(
-        model="gpt-4o-mini", messages=messages, tools=TOOLS,
+        model="gpt-5.2", messages=messages, tools=TOOLS,
         tool_choice="auto", max_tokens=1500, temperature=0,
     )
     msg_resp = response.choices[0].message

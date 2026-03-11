@@ -427,7 +427,14 @@ function SortHeader({ label, sortKey, current, dir, onClick, filterValue, onFilt
   filterValue: string; onFilter: (v: string) => void; filterOpts: string[];
 }) {
   const [showFilter, setShowFilter] = useState(false);
+  const [search, setSearch] = useState("");
   const active = current === sortKey;
+
+  const filteredOpts = search.trim()
+    ? filterOpts.filter(o => o.toLowerCase().includes(search.toLowerCase()))
+    : filterOpts;
+
+  function closeFilter() { setShowFilter(false); setSearch(""); }
 
   return (
     <div className="relative flex items-center gap-1 group/hdr">
@@ -448,12 +455,33 @@ function SortHeader({ label, sortKey, current, dir, onClick, filterValue, onFilt
         <button onClick={() => onFilter("")} className="text-slate-600 hover:text-red-400 text-xs transition-colors">×</button>
       )}
       {showFilter && (
-        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1e293b] border border-[#334155] rounded-lg shadow-xl min-w-[150px]">
-          <div className="p-1">
-            <button onClick={() => { onFilter(""); setShowFilter(false); }}
-              className="w-full text-left px-3 py-1.5 text-xs text-slate-400 hover:bg-slate-700 rounded">Todos</button>
-            {filterOpts.map(o => (
-              <button key={o} onClick={() => { onFilter(o); setShowFilter(false); }}
+        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1e293b] border border-[#334155] rounded-lg shadow-xl min-w-[200px]">
+          {/* Buscador — solo se muestra si hay muchas opciones */}
+          {filterOpts.length > 8 && (
+            <div className="p-2 border-b border-[#334155]">
+              <div className="relative">
+                <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Buscar..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="w-full pl-6 pr-2 py-1 bg-[#0f172a] border border-[#334155] rounded text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
+                />
+              </div>
+            </div>
+          )}
+          <div className="p-1 max-h-52 overflow-y-auto">
+            {!search && (
+              <button onClick={() => { onFilter(""); closeFilter(); }}
+                className="w-full text-left px-3 py-1.5 text-xs text-slate-400 hover:bg-slate-700 rounded">Todos</button>
+            )}
+            {filteredOpts.length === 0 && (
+              <p className="px-3 py-2 text-xs text-slate-600">Sin resultados</p>
+            )}
+            {filteredOpts.map(o => (
+              <button key={o} onClick={() => { onFilter(o); closeFilter(); }}
                 className={"w-full text-left px-3 py-1.5 text-xs rounded hover:bg-sky-500/10 transition-colors " + (filterValue === o ? "text-sky-400 bg-sky-500/10" : "text-slate-300")}>
                 {o}
               </button>

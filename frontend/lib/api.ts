@@ -789,6 +789,18 @@ export const api = {
       return r;
     }),
 
+  rrhhReabrir: (legajo: string, periodo: string, aprobadorLegajo: string) =>
+    apiFetch<{ ok: boolean; estado: string }>(
+      `/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}/reabrir`,
+      { method: "POST", body: JSON.stringify({ aprobador_legajo: aprobadorLegajo }) }
+    ).then(r => {
+      clearApiCache(`/api/rrhh/parte/${encodeURIComponent(legajo)}/${periodo}`);
+      clearApiCache(`/api/rrhh/bitacora/${encodeURIComponent(legajo)}`);
+      clearApiCache("/api/rrhh/equipo");
+      clearApiCache("/api/rrhh/consolidado");
+      return r;
+    }),
+
   rrhhBitacora: (legajo: string) =>
     apiGetCached<{ legajo: string; partes: RRHHBitacoraItem[] }>(
       `/api/rrhh/bitacora/${encodeURIComponent(legajo)}`, 5 * 60 * 1000

@@ -319,6 +319,29 @@ async def rechazar_parte(legajo: str, periodo: str, body: RechazarBody):
 
 
 # ==========================================================
+# Reabrir parte (líder — vuelve a BORRADOR)
+# ==========================================================
+
+@router.post("/parte/{legajo}/{periodo}/reabrir")
+async def reabrir_parte(legajo: str, periodo: str, body: AprobarBody):
+    parte = db.get_parte(legajo, periodo)
+    if not parte:
+        raise HTTPException(404, "Parte no encontrado.")
+    if parte["estado"] != "APROBADO":
+        raise HTTPException(400, f"Solo se pueden reabrir partes APROBADOS. Estado: {parte['estado']}.")
+    person = db.get_person(legajo)
+    aprobador = str(body.aprobador_legajo).strip()
+    if not person or (aprobador not in db.SUPER_LIDERES and str(person.get("leader_legajo","")).strip() != aprobador):
+        raise HTTPException(403, "No tenés permiso para reabrir este parte.")
+    db.update_parte_estado(legajo, periodo, "BORRADOR",
+                           rejection_comment=None,
+                           clear_approved=True)
+    # Invalida caché del líder directo del empleado (no del super líder que reabrió)
+    _invalidar_parte(legajo, periodo)
+    return {"ok": True, "estado": "BORRADOR"}
+
+
+# ==========================================================
 # Bitácora del empleado
 # ==========================================================
 

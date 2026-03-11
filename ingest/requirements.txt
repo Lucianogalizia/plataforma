@@ -1,0 +1,19 @@
+# Gmail API + OAuth2
+google-auth==2.29.0
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+google-api-python-client==2.128.0
+
+# GCS
+google-cloud-storage==2.16.0
+
+# Excel parsing
+openpyxl==3.1.2
+xlrd==2.0.1
+pandas==2.2.2
+
+# HTTP
+requests==2.31.0
+
+# Encriptar secret en GitHub (opcional, para auto-renovar el token)
+PyNaCl==1.5.0

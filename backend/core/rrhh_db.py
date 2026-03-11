@@ -335,23 +335,39 @@ def update_parte_estado(
     approved_at:        Optional[str] = None,
     approved_by_legajo: Optional[str] = None,
     rejection_comment:  Optional[str] = None,
+    clear_approved:     bool = False,
 ) -> None:
     legajo, periodo = str(legajo).strip(), str(periodo).strip()
     with get_conn() as conn:
         cur = conn.cursor()
-        cur.execute("""
-            UPDATE rrhh_partes SET
-                estado             = %s,
-                submitted_at       = COALESCE(%s, submitted_at),
-                approved_at        = COALESCE(%s, approved_at),
-                approved_by_legajo = COALESCE(%s, approved_by_legajo),
-                rejection_comment  = %s
-            WHERE legajo=%s AND periodo=%s
-        """, (
-            nuevo_estado, submitted_at, approved_at,
-            approved_by_legajo, rejection_comment,
-            legajo, periodo,
-        ))
+        if clear_approved:
+            cur.execute("""
+                UPDATE rrhh_partes SET
+                    estado             = %s,
+                    submitted_at       = COALESCE(%s, submitted_at),
+                    approved_at        = NULL,
+                    approved_by_legajo = NULL,
+                    rejection_comment  = %s
+                WHERE legajo=%s AND periodo=%s
+            """, (
+                nuevo_estado, submitted_at,
+                rejection_comment,
+                legajo, periodo,
+            ))
+        else:
+            cur.execute("""
+                UPDATE rrhh_partes SET
+                    estado             = %s,
+                    submitted_at       = COALESCE(%s, submitted_at),
+                    approved_at        = COALESCE(%s, approved_at),
+                    approved_by_legajo = COALESCE(%s, approved_by_legajo),
+                    rejection_comment  = %s
+                WHERE legajo=%s AND periodo=%s
+            """, (
+                nuevo_estado, submitted_at, approved_at,
+                approved_by_legajo, rejection_comment,
+                legajo, periodo,
+            ))
         cur.close()
 
 

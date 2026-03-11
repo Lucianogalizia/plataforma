@@ -58,7 +58,6 @@ from api.alertas_presion    import router as alertas_presion_router
 from api.controles          import router as controles_router
 from api.instalacion_fondo  import router as instalacion_fondo_router
 
-from api.chat import router as chat_router  # ← AGREGADO
 # ==========================================================
 # Configuración de entorno
 # ==========================================================
@@ -400,11 +399,7 @@ app.include_router(
     tags   = ["RRHH — Guardias y partes mensuales"],
 )
 
-app.include_router(
-    chat_router,
-    prefix = "/api/chat",
-    tags   = ["Chat — Asistente IA"],
-)
+
 
 # ==========================================================
 # Endpoints raíz

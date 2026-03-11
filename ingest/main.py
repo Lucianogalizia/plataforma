@@ -167,7 +167,10 @@ def buscar_mails_nuevos(service) -> list[dict]:
     sender = _env("GMAIL_SENDER_ESPERADO")
     asunto = _env("GMAIL_ASUNTO_CONTIENE", required=False)
 
-    query_parts = [f"from:{sender}", f"-label:{LABEL_PROCESADO}"]
+    senders = [s.strip() for s in sender.split(",")]
+    from_query = " OR ".join(f"from:{s}" for s in senders)
+    query_parts = [f"({from_query})", f"-label:{LABEL_PROCESADO}"]
+
     if asunto:
         query_parts.append(f'subject:"{asunto}"')
 

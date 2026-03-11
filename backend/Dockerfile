@@ -21,4 +21,4 @@ RUN mkdir -p /app/assets
 EXPOSE 8000
 
 # Comando de inicio
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

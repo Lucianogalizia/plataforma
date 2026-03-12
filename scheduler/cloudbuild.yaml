@@ -1,0 +1,5 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'Dockerfile.ingest', '-t', 'southamerica-east1-docker.pkg.dev/eventos-479403/dina/dina-ingest:latest', '.']
+images:
+  - 'southamerica-east1-docker.pkg.dev/eventos-479403/dina/dina-ingest:latest'

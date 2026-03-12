@@ -63,6 +63,14 @@ const NAV = [
     href: "/controles-historicos",
     icon: BarChart2,
   },
+
+  {
+    label: "Partes Diarios",
+    href: "/partes-diarios",
+    icon: BarChart2,
+  },
+
+
   {
     label: "Instalación de Fondo",
     href: "/instalacion-fondo",

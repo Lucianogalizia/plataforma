@@ -44,13 +44,11 @@ export default function PartesDiariosPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Pozos únicos
   const pozos = useMemo(() => {
     const set = new Set(data.map((d) => d.well_legal_name).filter(Boolean));
     return Array.from(set).sort();
   }, [data]);
 
-  // Filtrar por pozo
   const datosPorPozo = useMemo(() => {
     if (!pozoFiltro) return data;
     return data.filter(
@@ -58,7 +56,6 @@ export default function PartesDiariosPage() {
     );
   }, [data, pozoFiltro]);
 
-  // Eventos únicos del pozo seleccionado
   const eventos = useMemo(() => {
     const map = new Map<string, Evento>();
     datosPorPozo.forEach((d) => {
@@ -78,13 +75,11 @@ export default function PartesDiariosPage() {
     );
   }, [datosPorPozo]);
 
-  // Filas filtradas por evento
   const filas = useMemo(() => {
     if (!eventoFiltro) return datosPorPozo;
     return datosPorPozo.filter((d) => d.event_id === eventoFiltro);
   }, [datosPorPozo, eventoFiltro]);
 
-  // Exportar a Excel (CSV)
   function exportarCSV() {
     const cols = ["step_no","time_from","time_to","rig_name","loc_fed_lease_no","well_legal_name","activity_class_desc","activity_code_desc","activity_duration","expr1"];
     const header = cols.join(",");
@@ -101,13 +96,19 @@ export default function PartesDiariosPage() {
     URL.revokeObjectURL(url);
   }
 
+  function cleanExpr1(val: unknown): string {
+    return String(val ?? "—")
+      .replace(/_x000D_/g, "")
+      .replace(/\\n/g, " ")
+      .trim();
+  }
+
   return (
     <div style={{ padding: "24px", color: "#fff" }}>
       <h1 style={{ fontSize: "20px", fontWeight: "bold", marginBottom: "4px" }}>
         Partes Diarios de Torre
       </h1>
 
-      {/* Filtros */}
       <div style={{
         background: "#1a1a2e", borderRadius: "8px", padding: "20px",
         marginBottom: "24px", border: "1px solid #333"
@@ -152,7 +153,6 @@ export default function PartesDiariosPage() {
         </div>
       </div>
 
-      {/* Tabla */}
       <div style={{
         background: "#1a1a2e", borderRadius: "8px", padding: "20px", border: "1px solid #333"
       }}>
@@ -191,8 +191,8 @@ export default function PartesDiariosPage() {
                   <tr key={i} style={{ borderBottom: "1px solid #2a2a3e" }}>
                     {["step_no","time_from","time_to","rig_name","loc_fed_lease_no","well_legal_name",
                       "activity_class_desc","activity_code_desc","activity_duration","expr1"].map((col) => (
-                      <td key={col} style={{ padding: "8px 12px", color: "#ddd", maxWidth: "300px", whiteSpace: col === "expr1" ? "normal" : "nowrap" }}>
-                        {String(f[col] ?? "—")}
+                      <td key={col} style={{ padding: "8px 12px", color: "#ddd", ...(col === "expr1" ? { whiteSpace: "normal", minWidth: "300px" } : { whiteSpace: "nowrap", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis" }) }}>
+                        {col === "expr1" ? cleanExpr1(f[col]) : String(f[col] ?? "—")}
                       </td>
                     ))}
                   </tr>

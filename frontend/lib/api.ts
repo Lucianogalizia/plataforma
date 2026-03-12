@@ -815,13 +815,13 @@ export const api = {
     apiGetCached<RRHHConsolidado>(
       `/api/rrhh/consolidado/${encodeURIComponent(leaderLegajo)}/${periodo}`, 5 * 60 * 1000
     ),
-};
 
-getPartesDiariosInfo: async () => {
+
+  getPartesDiariosInfo: async () => {
     const res = await fetch(`${API}/api/partes-diarios/info`);
     return res.json();
   },
-
+  
   getPartesDiariosPozos: async () => {
     const res = await fetch(`${API}/api/partes-diarios/pozos`);
     return res.json();
@@ -834,7 +834,7 @@ getPartesDiariosInfo: async () => {
     const res = await fetch(`${API}/api/partes-diarios/datos?${query}`);
     return res.json();
   },
-
+};
 
 export default api;
 

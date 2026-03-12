@@ -181,7 +181,7 @@ export default function PartesDiariosPage() {
                   {["step_no","time_from","time_to","rig_name","loc_fed_lease_no","well_legal_name",
                     "activity_class_desc","activity_code_desc","activity_duration","expr1"].map((col) => (
                     <th key={col} style={{ padding: "8px 12px", textAlign: "left", color: "#aaa", whiteSpace: "nowrap" }}>
-                      {col}
+                      {col === "expr1" ? "activity" : col}
                     </th>
                   ))}
                 </tr>
@@ -191,7 +191,7 @@ export default function PartesDiariosPage() {
                   <tr key={i} style={{ borderBottom: "1px solid #2a2a3e" }}>
                     {["step_no","time_from","time_to","rig_name","loc_fed_lease_no","well_legal_name",
                       "activity_class_desc","activity_code_desc","activity_duration","expr1"].map((col) => (
-                      <td key={col} style={{ padding: "8px 12px", color: "#ddd", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <td key={col} style={{ padding: "8px 12px", color: "#ddd", maxWidth: "300px", whiteSpace: col === "expr1" ? "normal" : "nowrap" }}>
                         {String(f[col] ?? "—")}
                       </td>
                     ))}

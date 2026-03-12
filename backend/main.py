@@ -50,6 +50,7 @@ from api.alertas_presion    import router as alertas_presion_router
 from api.controles          import router as controles_router
 from api.instalacion_fondo  import router as instalacion_fondo_router
 from api.chat               import router as chat_router
+from api.partes_diarios     import router as partes_diarios_router
 
 
 # ==========================================================
@@ -310,7 +311,7 @@ app.include_router(controles_router,         prefix="/api/controles",         ta
 app.include_router(instalacion_fondo_router, prefix="/api/instalacion-fondo", tags=["Instalación de Fondo"])
 app.include_router(rrhh_router,              prefix="/api/rrhh",              tags=["RRHH — Guardias y partes mensuales"])
 app.include_router(chat_router,              prefix="/api/chat",              tags=["Chat — Asistente IA"])
-
+app.include_router(partes_diarios_router,    prefix="/api/partes-diarios",    tags=["Partes Diarios de Torre"])
 
 # ==========================================================
 # Endpoints raíz

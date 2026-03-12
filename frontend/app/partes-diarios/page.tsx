@@ -11,6 +11,7 @@ interface Parte {
   date_ops_end: string;
   event_objective_1: string;
   event_objective_2: string;
+  event_code: string;
   step_no: number;
   time_from: string;
   time_to: string;
@@ -18,6 +19,7 @@ interface Parte {
   activity_class_desc: string;
   activity_code_desc: string;
   activity_duration: number;
+  activity_subcode2: string;
   expr1: string;
   [key: string]: unknown;
 }
@@ -29,6 +31,21 @@ interface Evento {
   date_ops_end: string;
   event_objective_1: string;
   event_objective_2: string;
+}
+
+const COLS = [
+  "step_no","time_from","time_to","rig_name","loc_fed_lease_no",
+  "well_legal_name","activity_class_desc","activity_code_desc",
+  "activity_duration","expr1","activity_subcode2",
+  "date_ops_start","date_ops_end","event_code",
+  "event_objective_1","event_objective_2"
+];
+
+function cleanExpr1(val: unknown): string {
+  return String(val ?? "—")
+    .replace(/_x000D_/g, "")
+    .replace(/\\n/g, " ")
+    .trim();
 }
 
 export default function PartesDiariosPage() {
@@ -44,13 +61,11 @@ export default function PartesDiariosPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Pozos únicos
   const pozos = useMemo(() => {
     const set = new Set(data.map((d) => d.well_legal_name).filter(Boolean));
     return Array.from(set).sort();
   }, [data]);
 
-  // Filtrar por pozo
   const datosPorPozo = useMemo(() => {
     if (!pozoFiltro) return data;
     return data.filter(
@@ -58,7 +73,6 @@ export default function PartesDiariosPage() {
     );
   }, [data, pozoFiltro]);
 
-  // Eventos únicos del pozo seleccionado
   const eventos = useMemo(() => {
     const map = new Map<string, Evento>();
     datosPorPozo.forEach((d) => {
@@ -78,18 +92,15 @@ export default function PartesDiariosPage() {
     );
   }, [datosPorPozo]);
 
-  // Filas filtradas por evento
   const filas = useMemo(() => {
     if (!eventoFiltro) return datosPorPozo;
     return datosPorPozo.filter((d) => d.event_id === eventoFiltro);
   }, [datosPorPozo, eventoFiltro]);
 
-  // Exportar a Excel (CSV)
   function exportarCSV() {
-    const cols = ["step_no","time_from","time_to","rig_name","loc_fed_lease_no","well_legal_name","activity_class_desc","activity_code_desc","activity_duration","expr1"];
-    const header = cols.join(",");
+    const header = COLS.join(",");
     const rows = filas.map((f) =>
-      cols.map((c) => `"${String(f[c] ?? "").replace(/"/g, '""')}"`).join(",")
+      COLS.map((c) => `"${String(f[c] ?? "").replace(/"/g, '""')}"`).join(",")
     );
     const csv = [header, ...rows].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -107,7 +118,6 @@ export default function PartesDiariosPage() {
         Partes Diarios de Torre
       </h1>
 
-      {/* Filtros */}
       <div style={{
         background: "#1a1a2e", borderRadius: "8px", padding: "20px",
         marginBottom: "24px", border: "1px solid #333"
@@ -152,7 +162,6 @@ export default function PartesDiariosPage() {
         </div>
       </div>
 
-      {/* Tabla */}
       <div style={{
         background: "#1a1a2e", borderRadius: "8px", padding: "20px", border: "1px solid #333"
       }}>
@@ -178,10 +187,9 @@ export default function PartesDiariosPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid #444" }}>
-                  {["step_no","time_from","time_to","rig_name","loc_fed_lease_no","well_legal_name",
-                    "activity_class_desc","activity_code_desc","activity_duration","expr1"].map((col) => (
+                  {COLS.map((col) => (
                     <th key={col} style={{ padding: "8px 12px", textAlign: "left", color: "#aaa", whiteSpace: "nowrap" }}>
-                      {col}
+                      {col === "expr1" ? "activity" : col}
                     </th>
                   ))}
                 </tr>
@@ -189,10 +197,9 @@ export default function PartesDiariosPage() {
               <tbody>
                 {filas.map((f, i) => (
                   <tr key={i} style={{ borderBottom: "1px solid #2a2a3e" }}>
-                    {["step_no","time_from","time_to","rig_name","loc_fed_lease_no","well_legal_name",
-                      "activity_class_desc","activity_code_desc","activity_duration","expr1"].map((col) => (
-                      <td key={col} style={{ padding: "8px 12px", color: "#ddd", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {String(f[col] ?? "—")}
+                    {COLS.map((col) => (
+                      <td key={col} style={{ padding: "8px 12px", color: "#ddd", ...(col === "expr1" ? { whiteSpace: "normal", minWidth: "300px" } : { whiteSpace: "nowrap", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis" }) }}>
+                        {col === "expr1" ? cleanExpr1(f[col]) : String(f[col] ?? "—")}
                       </td>
                     ))}
                   </tr>

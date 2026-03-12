@@ -840,6 +840,8 @@ function TabConsolidado({ user, periodos }: { user: RRHHUser; periodos: RRHHPeri
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [reabriendo, setReabriendo] = useState<string | null>(null);
+  const [msgReabrir, setMsgReabrir] = useState<{ tipo: "ok" | "err"; texto: string } | null>(null);
 
   const loadConsolidado = useCallback(async (pid: string) => {
     setLoading(true);
@@ -849,6 +851,19 @@ function TabConsolidado({ user, periodos }: { user: RRHHUser; periodos: RRHHPeri
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }, [user.legajo]);
+
+  const handleReabrir = async (legajo: string, nombre: string) => {
+    if (!confirm(`¿Confirmás reabrir el parte de ${nombre}? Volverá a estado BORRADOR.`)) return;
+    setReabriendo(legajo);
+    setMsgReabrir(null);
+    try {
+      await api.rrhhReabrir(legajo, periodoId, user.legajo);
+      setMsgReabrir({ tipo: "ok", texto: `Parte de ${nombre} reabierto. El empleado puede volver a cargarlo.` });
+      loadConsolidado(periodoId);
+    } catch (e: unknown) {
+      setMsgReabrir({ tipo: "err", texto: e instanceof Error ? e.message : "Error al reabrir." });
+    } finally { setReabriendo(null); }
+  };
 
   useEffect(() => {
     if (periodoId) loadConsolidado(periodoId);
@@ -896,6 +911,17 @@ function TabConsolidado({ user, periodos }: { user: RRHHUser; periodos: RRHHPeri
         </button>
       </div>
 
+      {msgReabrir && (
+        <div className={`flex items-center gap-2 text-sm px-4 py-2.5 rounded-lg border ${
+          msgReabrir.tipo === "ok"
+            ? "text-emerald-300 bg-emerald-900/20 border-emerald-700/30"
+            : "text-red-400 bg-red-900/20 border-red-900/30"
+        }`}>
+          {msgReabrir.tipo === "ok" ? <Check size={14} /> : <AlertCircle size={14} />}
+          {msgReabrir.texto}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <RefreshCw size={20} className="animate-spin text-sky-400 mr-2" />
@@ -939,14 +965,26 @@ function TabConsolidado({ user, periodos }: { user: RRHHUser; periodos: RRHHPeri
                         </td>
                       ))}
                       <td className="px-3 py-2.5 text-center">
-                        <button
-                          onClick={() => setExpanded(e => e === emp.legajo ? null : emp.legajo)}
-                          className="text-sky-400 hover:text-sky-300 transition-colors"
-                        >
-                          {expanded === emp.legajo
-                            ? <ChevronUp size={16} />
-                            : <ChevronDown size={16} />}
-                        </button>
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => setExpanded(e => e === emp.legajo ? null : emp.legajo)}
+                            className="text-sky-400 hover:text-sky-300 transition-colors"
+                          >
+                            {expanded === emp.legajo
+                              ? <ChevronUp size={16} />
+                              : <ChevronDown size={16} />}
+                          </button>
+                          {emp.estado === "APROBADO" && (
+                            <button
+                              onClick={() => handleReabrir(emp.legajo, emp.nombre)}
+                              disabled={reabriendo === emp.legajo}
+                              title="Reabrir parte"
+                              className="text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-50"
+                            >
+                              <RefreshCw size={14} className={reabriendo === emp.legajo ? "animate-spin" : ""} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
 

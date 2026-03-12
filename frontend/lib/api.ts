@@ -817,6 +817,25 @@ export const api = {
     ),
 };
 
+getPartesDiariosInfo: async () => {
+    const res = await fetch(`${API}/api/partes-diarios/info`);
+    return res.json();
+  },
+
+  getPartesDiariosPozos: async () => {
+    const res = await fetch(`${API}/api/partes-diarios/pozos`);
+    return res.json();
+  },
+
+  getPartesDiariosDatos: async (params: { pozo?: string; limit?: number }) => {
+    const query = new URLSearchParams();
+    if (params.pozo) query.set("pozo", params.pozo);
+    if (params.limit) query.set("limit", String(params.limit));
+    const res = await fetch(`${API}/api/partes-diarios/datos?${query}`);
+    return res.json();
+  },
+
+
 export default api;
 
 // ==========================================================

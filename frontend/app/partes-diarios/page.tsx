@@ -1,227 +1,204 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import api, { clearApiCache } from "@/lib/api";
+import { useEffect, useState, useMemo } from "react";
+import api from "@/lib/api";
 
-interface ParteDiarioInfo {
-  exists: boolean;
-  updated_at: string | null;
-  file?: string;
-  size_kb?: number;
-  rows?: number;
-  columns?: string[];
-  error?: string;
-}
-
-interface ParteDiarioRow {
-  well_legal_name?: string;
-  date_report?: string;
-  time_from?: string;
-  time_to?: string;
-  activity_duration?: number | null;
-  activity_class?: string;
-  activity_code?: string;
-  expr1?: string;
-  status_end?: string;
-  rig_name?: string;
-  contractor_name?: string;
-  event_objective_1?: string;
+interface Parte {
+  well_legal_name: string;
+  rig_name: string;
+  event_id: string;
+  date_ops_start: string;
+  date_ops_end: string;
+  event_objective_1: string;
+  event_objective_2: string;
+  step_no: number;
+  time_from: string;
+  time_to: string;
+  loc_fed_lease_no: string;
+  activity_class_desc: string;
+  activity_code_desc: string;
+  activity_duration: number;
+  expr1: string;
   [key: string]: unknown;
 }
 
-const COLS_OCULTAR = ["_INGESTED_AT", "_SOURCE_FILE", "well_id", "event_id", "entity_type", "event_code", "event_type", "well_legal_name"];
-
-const COL_LABELS: Record<string, string> = {
-  date_report: "Fecha",
-  time_from: "Inicio",
-  time_to: "Fin",
-  activity_duration: "Duración (h)",
-  activity_class: "Clase",
-  activity_code: "Código",
-  activity_phase: "Sub-código",
-  activity_subcode: "Tarifa",
-  expr1: "Descripción",
-  status_end: "Estado",
-  rig_name: "Equipo",
-  contractor_name: "Contratista",
-  event_objective_1: "Tipo Intervención",
-  event_objective_2: "Objetivo",
-  step_no: "Paso",
-};
+interface Evento {
+  event_id: string;
+  rig_name: string;
+  date_ops_start: string;
+  date_ops_end: string;
+  event_objective_1: string;
+  event_objective_2: string;
+}
 
 export default function PartesDiariosPage() {
-  const [info, setInfo] = useState<ParteDiarioInfo | null>(null);
-  const [rows, setRows] = useState<ParteDiarioRow[]>([]);
+  const [data, setData] = useState<Parte[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingRows, setLoadingRows] = useState(false);
   const [pozoFiltro, setPozoFiltro] = useState("");
-  const [pozos, setPozos] = useState<{ pozo: string; status: string }[]>([]);
+  const [eventoFiltro, setEventoFiltro] = useState("");
 
-  const cargarInfo = useCallback(async () => {
+  useEffect(() => {
     setLoading(true);
-    try {
-      const data = await api.getPartesDiariosInfo();
-      setInfo(data);
-    } catch {
-      setInfo({ exists: false, updated_at: null, error: "Error conectando con el backend" });
-    }
-    setLoading(false);
+    api.getPartesDiariosDatos({ limit: 50000 })
+      .then((res: { data: Parte[] }) => setData(res.data || []))
+      .finally(() => setLoading(false));
   }, []);
 
-  const cargarPozos = useCallback(async () => {
-    try {
-      const data = await api.getPartesDiariosPozos();
-      setPozos(data.pozos);
-    } catch {
-      setPozos([]);
-    }
-  }, []);
+  // Pozos únicos
+  const pozos = useMemo(() => {
+    const set = new Set(data.map((d) => d.well_legal_name).filter(Boolean));
+    return Array.from(set).sort();
+  }, [data]);
 
-  const cargarDatos = useCallback(async () => {
-    setLoadingRows(true);
-    try {
-      const data = await api.getPartesDiariosDatos({
-        pozo: pozoFiltro || undefined,
-        limit: 2000,
-      });
-      setRows(data.data);
-    } catch {
-      setRows([]);
-    }
-    setLoadingRows(false);
-  }, [pozoFiltro]);
+  // Filtrar por pozo
+  const datosPorPozo = useMemo(() => {
+    if (!pozoFiltro) return data;
+    return data.filter(
+      (d) => d.well_legal_name?.toLowerCase().includes(pozoFiltro.toLowerCase())
+    );
+  }, [data, pozoFiltro]);
 
-  useEffect(() => {
-    cargarInfo();
-    cargarPozos();
-  }, [cargarInfo, cargarPozos]);
+  // Eventos únicos del pozo seleccionado
+  const eventos = useMemo(() => {
+    const map = new Map<string, Evento>();
+    datosPorPozo.forEach((d) => {
+      if (d.event_id && !map.has(d.event_id)) {
+        map.set(d.event_id, {
+          event_id: d.event_id,
+          rig_name: d.rig_name,
+          date_ops_start: d.date_ops_start,
+          date_ops_end: d.date_ops_end,
+          event_objective_1: d.event_objective_1,
+          event_objective_2: d.event_objective_2,
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) =>
+      (b.date_ops_start || "").localeCompare(a.date_ops_start || "")
+    );
+  }, [datosPorPozo]);
 
-  useEffect(() => {
-    if (info?.exists) cargarDatos();
-  }, [info, cargarDatos]);
+  // Filas filtradas por evento
+  const filas = useMemo(() => {
+    if (!eventoFiltro) return datosPorPozo;
+    return datosPorPozo.filter((d) => d.event_id === eventoFiltro);
+  }, [datosPorPozo, eventoFiltro]);
 
-  const handleRefresh = () => {
-    clearApiCache("/api/partes-diarios");
-    cargarInfo();
-    cargarPozos();
-    cargarDatos();
-  };
-
-  const formatDate = (iso: string | null) => {
-    if (!iso) return "—";
-    try {
-      return new Date(iso).toLocaleString("es-AR", {
-        day: "2-digit", month: "2-digit", year: "numeric",
-        hour: "2-digit", minute: "2-digit",
-      });
-    } catch { return iso; }
-  };
-
-  const columnas = rows.length > 0
-    ? Object.keys(rows[0]).filter(c => !COLS_OCULTAR.includes(c))
-    : [];
-
-  const statusColor = (status?: string) => {
-    if (!status) return "text-slate-400";
-    if (status === "EN_CURSO") return "text-yellow-400";
-    if (status === "COMPLETADO") return "text-green-400";
-    return "text-slate-400";
-  };
+  // Exportar a Excel (CSV)
+  function exportarCSV() {
+    const cols = ["step_no","time_from","time_to","rig_name","loc_fed_lease_no","well_legal_name","activity_class_desc","activity_code_desc","activity_duration","expr1"];
+    const header = cols.join(",");
+    const rows = filas.map((f) =>
+      cols.map((c) => `"${String(f[c] ?? "").replace(/"/g, '""')}"`).join(",")
+    );
+    const csv = [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "partes_diarios.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-[#334155]">
-        <div>
-          <h1 className="text-xl font-bold text-slate-100">Partes Diarios de Torre</h1>
-          {info?.exists && (
-            <p className="text-xs text-slate-400 mt-1">
-              Última actualización: {formatDate(info.updated_at)}
-              {info.rows ? ` · ${info.rows} actividades` : ""}
-              {info.size_kb ? ` · ${info.size_kb} KB` : ""}
-            </p>
-          )}
+    <div style={{ padding: "24px", color: "#fff" }}>
+      <h1 style={{ fontSize: "20px", fontWeight: "bold", marginBottom: "4px" }}>
+        Partes Diarios de Torre
+      </h1>
+
+      {/* Filtros */}
+      <div style={{
+        background: "#1a1a2e", borderRadius: "8px", padding: "20px",
+        marginBottom: "24px", border: "1px solid #333"
+      }}>
+        <h2 style={{ color: "#e53e3e", fontWeight: "bold", marginBottom: "16px" }}>Filtros</h2>
+        <div style={{ display: "flex", gap: "24px", flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: "200px" }}>
+            <label style={{ display: "block", marginBottom: "6px", fontSize: "13px", color: "#aaa" }}>Pozo</label>
+            <input
+              type="text"
+              value={pozoFiltro}
+              onChange={(e) => { setPozoFiltro(e.target.value); setEventoFiltro(""); }}
+              placeholder="Ej: YPF.SC.BB-101"
+              style={{
+                width: "100%", padding: "8px 12px", borderRadius: "6px",
+                background: "#fff", color: "#000", border: "1px solid #555", fontSize: "14px"
+              }}
+              list="pozos-list"
+            />
+            <datalist id="pozos-list">
+              {pozos.map((p) => <option key={p} value={p} />)}
+            </datalist>
+          </div>
+          <div style={{ flex: 2, minWidth: "300px" }}>
+            <label style={{ display: "block", marginBottom: "6px", fontSize: "13px", color: "#aaa" }}>Evento</label>
+            <select
+              value={eventoFiltro}
+              onChange={(e) => setEventoFiltro(e.target.value)}
+              style={{
+                width: "100%", padding: "8px 12px", borderRadius: "6px",
+                background: "#fff", color: "#000", border: "1px solid #555", fontSize: "14px"
+              }}
+            >
+              <option value="">— Todos los eventos —</option>
+              {eventos.map((ev) => (
+                <option key={ev.event_id} value={ev.event_id}>
+                  {ev.rig_name} | {ev.date_ops_start} → {ev.date_ops_end} | {ev.event_objective_1} {ev.event_objective_2}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-        <button
-          onClick={handleRefresh}
-          disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 transition-colors"
-        >
-          <svg className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Actualizar
-        </button>
       </div>
 
-      {info?.exists && pozos.length > 0 && (
-        <div className="flex items-center gap-4 px-6 py-3 border-b border-[#334155] bg-[#1e293b]">
-          <label className="text-xs text-slate-400">Pozo:</label>
-          <select
-            value={pozoFiltro}
-            onChange={e => setPozoFiltro(e.target.value)}
-            className="bg-[#0f172a] border border-[#334155] text-slate-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-sky-500"
+      {/* Tabla */}
+      <div style={{
+        background: "#1a1a2e", borderRadius: "8px", padding: "20px", border: "1px solid #333"
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <h2 style={{ color: "#e53e3e", fontWeight: "bold" }}>Detalle intervención</h2>
+          <button
+            onClick={exportarCSV}
+            style={{
+              padding: "6px 16px", borderRadius: "6px", border: "1px solid #aaa",
+              background: "transparent", color: "#fff", cursor: "pointer", fontSize: "13px"
+            }}
           >
-            <option value="">Todos</option>
-            {pozos.map(p => (
-              <option key={p.pozo} value={p.pozo}>
-                {p.pozo} — {p.status}
-              </option>
-            ))}
-          </select>
-          <span className="text-xs text-slate-500">{rows.length} actividades</span>
+            Exportar a Excel
+          </button>
         </div>
-      )}
 
-      <div className="flex-1 overflow-auto">
         {loading ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <div className="w-8 h-8 border-2 border-sky-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-slate-400 text-sm">Cargando...</p>
-            </div>
-          </div>
-        ) : !info?.exists ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center max-w-md px-6">
-              <h2 className="text-lg font-semibold text-slate-200 mb-2">Sin datos todavía</h2>
-              <p className="text-sm text-slate-400 mb-1">
-                {info?.error || "No hay partes diarios procesados aún."}
-              </p>
-            </div>
-          </div>
+          <p style={{ color: "#aaa" }}>Cargando...</p>
+        ) : filas.length === 0 ? (
+          <p style={{ color: "#aaa" }}>Sin datos para los filtros seleccionados.</p>
         ) : (
-          <div className="overflow-x-auto">
-            {loadingRows ? (
-              <div className="flex items-center justify-center py-20">
-                <div className="w-6 h-6 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />
-              </div>
-            ) : (
-              <table className="w-full text-sm text-left">
-                <thead className="sticky top-0 bg-[#1e293b] border-b border-[#334155]">
-                  <tr>
-                    {columnas.map(col => (
-                      <th key={col} className="px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">
-                        {COL_LABELS[col] || col}
-                      </th>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid #444" }}>
+                  {["step_no","time_from","time_to","rig_name","loc_fed_lease_no","well_legal_name",
+                    "activity_class_desc","activity_code_desc","activity_duration","expr1"].map((col) => (
+                    <th key={col} style={{ padding: "8px 12px", textAlign: "left", color: "#aaa", whiteSpace: "nowrap" }}>
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filas.map((f, i) => (
+                  <tr key={i} style={{ borderBottom: "1px solid #2a2a3e" }}>
+                    {["step_no","time_from","time_to","rig_name","loc_fed_lease_no","well_legal_name",
+                      "activity_class_desc","activity_code_desc","activity_duration","expr1"].map((col) => (
+                      <td key={col} style={{ padding: "8px 12px", color: "#ddd", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {String(f[col] ?? "—")}
+                      </td>
                     ))}
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-[#1e293b]">
-                  {rows.map((row, i) => (
-                    <tr key={i} className="hover:bg-[#1e293b] transition-colors">
-                      {columnas.map(col => (
-                        <td key={col} className={`px-4 py-2.5 whitespace-nowrap text-xs ${col === "status_end" ? statusColor(row[col] as string) : "text-slate-300"}`}>
-                          {col === "activity_duration" && row[col] != null
-                            ? Number(row[col]).toFixed(2)
-                            : row[col] != null ? String(row[col]) : "—"}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

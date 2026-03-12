@@ -25,7 +25,7 @@ from typing import Optional
 from core.gcs import GCS_BUCKET, GCS_PREFIX, get_gcs_client
 from core.cache import cache as _cache
 
-_ACCIONES_TTL = 3600  # 1 hora
+_ACCIONES_TTL = 10  # 1 hora
 
 
 # ==========================================================

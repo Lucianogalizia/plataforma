@@ -18,27 +18,37 @@ router = APIRouter()
 PARTES_FOLDER = "partes_diarios"
 
 
-def _blob_name(filename: str) -> str:
-    path = f"{PARTES_FOLDER}/{filename}"
-    if GCS_PREFIX:
-        return f"{GCS_PREFIX}/{path}"
-    return path
-
-
-def _get_latest_blob():
+def _get_all_data() -> pd.DataFrame:
+    """
+    Lee todos los CSV de la carpeta partes_diarios/ y los combina en un DataFrame.
+    """
     client = get_gcs_client()
     if not client or not GCS_BUCKET:
-        return None, None
+        return pd.DataFrame()
 
     prefix = f"{GCS_PREFIX}/{PARTES_FOLDER}/" if GCS_PREFIX else f"{PARTES_FOLDER}/"
     blobs  = list(client.bucket(GCS_BUCKET).list_blobs(prefix=prefix))
-
     csv_blobs = [b for b in blobs if b.name.endswith(".csv")]
-    if not csv_blobs:
-        return None, None
 
-    latest = sorted(csv_blobs, key=lambda b: b.updated, reverse=True)[0]
-    return client, latest
+    if not csv_blobs:
+        return pd.DataFrame()
+
+    dfs = []
+    for blob in csv_blobs:
+        try:
+            content = blob.download_as_bytes()
+            df = pd.read_csv(io.BytesIO(content), low_memory=False)
+            dfs.append(df)
+        except Exception:
+            continue
+
+    if not dfs:
+        return pd.DataFrame()
+
+    combined = pd.concat(dfs, ignore_index=True)
+    # Eliminar duplicados si los hay
+    combined = combined.drop_duplicates()
+    return combined
 
 
 @router.get("/info")
@@ -47,8 +57,8 @@ async def intervenciones_info():
     if not client or not GCS_BUCKET:
         return JSONResponse(content={"exists": False, "error": "GCS no configurado"})
     try:
-        _, blob = _get_latest_blob()
-        if not blob:
+        df = _get_all_data()
+        if df.empty:
             return JSONResponse(content={
                 "exists": False,
                 "updated_at": None,
@@ -56,16 +66,10 @@ async def intervenciones_info():
                 "size_kb": 0,
                 "rows": 0,
             })
-        blob.reload()
-        content = blob.download_as_bytes()
-        df = pd.read_csv(io.BytesIO(content), low_memory=False)
         return JSONResponse(content={
-            "exists":     True,
-            "updated_at": blob.updated.isoformat() if blob.updated else None,
-            "file":       blob.name,
-            "size_kb":    round((blob.size or 0) / 1024, 1),
-            "rows":       len(df),
-            "columns":    list(df.columns),
+            "exists":   True,
+            "rows":     len(df),
+            "columns":  list(df.columns),
         })
     except Exception as e:
         return JSONResponse(status_code=500, content={"exists": False, "error": str(e)})
@@ -77,18 +81,16 @@ async def intervenciones_datos(
     fecha_desde: str | None = None,
     fecha_hasta: str | None = None,
     status:      str | None = None,
-    limit:       int        = 5000,
+    limit:       int        = 50000,
 ):
     client = get_gcs_client()
     if not client or not GCS_BUCKET:
         raise HTTPException(status_code=503, detail="GCS no configurado.")
 
     try:
-        _, blob = _get_latest_blob()
-        if not blob:
+        df = _get_all_data()
+        if df.empty:
             raise HTTPException(status_code=404, detail="No hay partes diarios en GCS.")
-        content = blob.download_as_bytes()
-        df      = pd.read_csv(io.BytesIO(content), low_memory=False)
     except HTTPException:
         raise
     except Exception as e:
@@ -122,11 +124,9 @@ async def intervenciones_pozos():
     if not client or not GCS_BUCKET:
         raise HTTPException(status_code=503, detail="GCS no configurado.")
     try:
-        _, blob = _get_latest_blob()
-        if not blob:
+        df = _get_all_data()
+        if df.empty:
             return JSONResponse(content={"pozos": []})
-        df = pd.read_csv(io.BytesIO(blob.download_as_bytes()), low_memory=False,
-                         usecols=["well_legal_name", "status_end"])
         pozos = (
             df.groupby("well_legal_name")["status_end"]
             .last()

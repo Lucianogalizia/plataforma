@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import ChatAssistant from "@/components/ChatAssistant";
+import TopBar from "@/components/TopBar";
 
 export const metadata: Metadata = {
   title: "Plataforma DINA",
@@ -15,6 +16,7 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body>
+        <TopBar />
         {children}
         <ChatAssistant />
       </body>

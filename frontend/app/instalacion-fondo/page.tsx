@@ -111,7 +111,7 @@ export default function InstalacionFondoPage() {
             src={`${API_URL}/api/instalacion-fondo/dashboard`}
             className="w-full h-full border-0"
             title="Instalación de Fondo — Viewer IF"
-            sandbox="allow-scripts allow-same-origin"
+            sandbox="allow-scripts allow-same-origin allow-downloads"
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center bg-[#0f172a]">

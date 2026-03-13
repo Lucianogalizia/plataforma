@@ -1,4 +1,4 @@
-# ==========================================================
+# =========================================================
 # backend/core/gcs.py
 #
 # Toda la lógica de Google Cloud Storage extraída de app.py

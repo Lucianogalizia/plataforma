@@ -138,6 +138,26 @@ def _get_pozos_con_din(din_ok: pd.DataFrame) -> list[str]:
 # GET /api/diagnosticos/tabla-global
 # ----------------------------------------------------------
 
+def _get_tabla_global_df():
+    """Construye (o devuelve desde caché) el DataFrame de la tabla global."""
+    cached = cache.get("diag_tabla_global_df")
+    if cached is not None:
+        return cached
+
+    din_ok, _ = _load_din_niv_ok()
+    pozos     = _get_pozos_con_din(din_ok)
+
+    if not pozos:
+        import pandas as pd
+        return pd.DataFrame()
+
+    diags   = load_all_diags_from_gcs(pozos)
+    bat_map = _get_bat_map()
+    df      = build_global_table(diags, bat_map, normalize_no_exact)
+    cache.set("diag_tabla_global_df", df, ttl=_DIAG_IDX_TTL)
+    return df
+
+
 @router.get("/tabla-global")
 async def get_tabla_global(
     baterias:     Optional[str] = Query(None),
@@ -148,15 +168,7 @@ async def get_tabla_global(
     Tabla global de diagnósticos — una fila por medición.
     Devuelve { total, rows, kpis }.
     """
-    din_ok, _ = _load_din_niv_ok()
-    pozos     = _get_pozos_con_din(din_ok)
-
-    if not pozos:
-        return {"total": 0, "rows": [], "kpis": {}}
-
-    diags   = load_all_diags_from_gcs(pozos)
-    bat_map = _get_bat_map()
-    df      = build_global_table(diags, bat_map, normalize_no_exact)
+    df = _get_tabla_global_df()
 
     if df.empty:
         return {"total": 0, "rows": [], "kpis": {}}

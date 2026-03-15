@@ -1,4 +1,4 @@
-# =========================================================
+# ==========================================================
 # backend/core/gcs.py
 #
 # Toda la lógica de Google Cloud Storage extraída de app.py
@@ -437,8 +437,8 @@ def load_diag_from_gcs(no_key: str) -> dict | None:
 
 def load_all_diags_from_gcs(pozos_interes: list[str]) -> dict[str, dict]:
     """
-    OPTIMIZADO: Lista todos los archivos de la carpeta diagnosticos/ de una sola vez.
-    Esto evita el Timeout (Error 500) y es mucho más rápido.
+    OPTIMIZADO: Lista todos los archivos de la carpeta diagnosticos/ de una sola vez
+    y los descarga en paralelo con ThreadPoolExecutor.
     Resultado cacheado en memoria (_DATA_TTL).
     """
     cached = _cache.get("gcs_all_diags")
@@ -446,36 +446,49 @@ def load_all_diags_from_gcs(pozos_interes: list[str]) -> dict[str, dict]:
         return {k: v for k, v in cached.items() if k in pozos_interes}
 
     import json
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     client = get_gcs_client()
     if not client or not GCS_BUCKET:
         return {}
 
     results = {}
     try:
-        bucket = client.bucket(GCS_BUCKET)
         prefix = "diagnosticos/"
         if GCS_PREFIX:
             prefix = f"{GCS_PREFIX}/{prefix}"
 
         # Listamos TODO lo que hay en la carpeta de diagnósticos de un solo golpe
         blobs = list(client.list_blobs(GCS_BUCKET, prefix=prefix))
-        
-        # Filtramos solo los que son diagnostico.json
+
+        # Filtramos solo los diagnostico.json y armamos (pozo_id, blob) pairs
+        targets: list[tuple[str, object]] = []
         for blob in blobs:
             if not blob.name.endswith("diagnostico.json"):
                 continue
-            
-            # Extraemos el nombre del pozo de la ruta: diagnosticos/POZO/diagnostico.json
             parts = blob.name.replace(prefix, "").split("/")
-            if not parts: continue
-            pozo_id = parts[0]
+            if not parts:
+                continue
+            targets.append((parts[0], blob))
 
+        # Descarga paralela — máximo 20 workers para no saturar GCS
+        def _download(pozo_id_blob):
+            pozo_id, blob = pozo_id_blob
             try:
                 data = json.loads(blob.download_as_text(encoding="utf-8"))
                 if "error" not in data:
+                    return pozo_id, data
+            except Exception:
+                pass
+            return pozo_id, None
+
+        with ThreadPoolExecutor(max_workers=min(10, len(targets) or 1)) as pool:
+            futures = {pool.submit(_download, t): t[0] for t in targets}
+            for future in as_completed(futures):
+                pozo_id, data = future.result()
+                if data is not None:
                     results[pozo_id] = data
-            except:
-                continue
+
     except Exception as e:
         print(f"Error masivo cargando diagnósticos: {e}")
 
@@ -505,6 +518,7 @@ def save_diag_to_gcs(no_key: str, diag: dict) -> bool:
             content_type="application/json",
         )
         _cache.delete("gcs_all_diags")
+        _cache.delete("diag_tabla_global_df")  # invalida también el df cacheado
         return True
     except Exception:
         return False
